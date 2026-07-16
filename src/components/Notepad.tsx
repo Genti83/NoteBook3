@@ -1813,13 +1813,22 @@ export function Notepad() {
   };
 
   const handleResetApp = () => {
-       executeProtectedAction(() => {
+       executeProtectedAction(async () => {
             if(window.confirm('Kujdes! A jeni i sigurt që doni të FSHINI TË GJITHA të dhënat dhe dokumentet? Ky veprim NUK kthehet mbrapsht!')) {
                  localStorage.removeItem('grid_notepad_documents_v2');
                  localStorage.removeItem('grid_notepad_blue');
+                 
+                 if (auth.currentUser && navigator.onLine) {
+                     for (const d of documents) {
+                         deleteDoc(doc(db, 'documents', d.id)).catch(() => {});
+                     }
+                     setDoc(doc(db, 'settings', auth.currentUser.uid), { blueText: '', userId: auth.currentUser.uid }).catch(() => {});
+                     setCloudDocs([]);
+                 }
+
                  setDocuments([]);
                  setBlueText('');
-                 showToast('Të gjitha të dhënat u fshinë nga pajisja.');
+                 showToast('Të gjitha të dhënat u fshinë nga pajisja dhe Cloud.');
             }
        });
        setShowOptionsMenu(false);
@@ -1954,17 +1963,29 @@ export function Notepad() {
   };
 
   const handleDeleteEmptyDocs = () => {
-       executeProtectedAction(() => {
+       executeProtectedAction(async () => {
            let emptyCount = 0;
+           const emptyDocIds: string[] = [];
            const newDocs = documents.filter(doc => {
                const hasData = doc.rows.some(r => doc.headers.some((_, c) => (r[`col${c+1}`] || '').toString().trim()) || r.image);
-               if (!hasData) emptyCount++;
+               if (!hasData) {
+                   emptyCount++;
+                   emptyDocIds.push(doc.id);
+               }
                return hasData;
            });
            if (emptyCount > 0) {
                setDocuments(newDocs);
                localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(newDocs));
-               showToast(`U fshinë me sukses ${emptyCount} dokumente bosh.`);
+               
+               if (auth.currentUser && navigator.onLine) {
+                   for (const id of emptyDocIds) {
+                       deleteDoc(doc(db, 'documents', id)).catch(() => {});
+                   }
+                   setCloudDocs(prev => prev.filter(d => !emptyDocIds.includes(d.id)));
+               }
+
+               showToast(`U fshinë me sukses ${emptyCount} dokumente bosh (dhe nga Cloud).`);
            } else {
                showToast("Nuk u gjetën dokumente bosh.");
            }
@@ -1973,7 +1994,7 @@ export function Notepad() {
   };
 
   const handleCleanupEmptyRowsAll = () => {
-       executeProtectedAction(() => {
+       executeProtectedAction(async () => {
            let totalCleaned = 0;
            const newDocs = documents.map(doc => {
                const originalLen = doc.rows.length;
@@ -1984,6 +2005,17 @@ export function Notepad() {
            if (totalCleaned > 0) {
                setDocuments(newDocs);
                localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(newDocs));
+
+               if (auth.currentUser && navigator.onLine) {
+                   for (const docObj of newDocs) {
+                       setDoc(doc(db, 'documents', docObj.id), { ...docObj, userId: auth.currentUser.uid }).catch(() => {});
+                   }
+                   setCloudDocs(prev => prev.map(c => {
+                       const local = newDocs.find(l => l.id === c.id);
+                       return local ? { ...c, rows: local.rows } : c;
+                   }));
+               }
+
                showToast(`U pastruan ${totalCleaned} rrjeshta bosh kudo.`);
            } else {
                showToast("Nuk kishte asnjë rrjesht bosh për t'u pastruar.");
@@ -1993,7 +2025,7 @@ export function Notepad() {
   };
 
   const handleStripAllImages = () => {
-       executeProtectedAction(() => {
+       executeProtectedAction(async () => {
            if(window.confirm('Kujdes! Dëshironi të fshini të gjitha imazhet nga aplikacioni për të kursyer hapësirën (Storage)? Kjo nuk zhbëhet!')) {
                let imagesRemoved = 0;
                const newDocs = documents.map(doc => {
@@ -2006,6 +2038,17 @@ export function Notepad() {
                if (imagesRemoved > 0) {
                    setDocuments(newDocs);
                    localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(newDocs));
+
+                   if (auth.currentUser && navigator.onLine) {
+                       for (const docObj of newDocs) {
+                           setDoc(doc(db, 'documents', docObj.id), { ...docObj, userId: auth.currentUser.uid }).catch(() => {});
+                       }
+                       setCloudDocs(prev => prev.map(c => {
+                           const local = newDocs.find(l => l.id === c.id);
+                           return local ? { ...c, rows: local.rows } : c;
+                       }));
+                   }
+
                    showToast(`U fshinë me sukses ${imagesRemoved} imazhe.`);
                } else {
                    showToast("Asnjë imazh nuk u gjet.");
@@ -3653,7 +3696,7 @@ export function Notepad() {
                top: calcPos.y, 
                zIndex: 95 
             }}
-            className={`w-48 sm:w-52 rounded-xl shadow-2xl border flex flex-col overflow-hidden animate-in fade-in zoom-in-95 ${
+            className={`w-40 sm:w-44 rounded-xl shadow-2xl border flex flex-col overflow-hidden animate-in fade-in zoom-in-95 ${
                isDark ? 'bg-zinc-900 border-zinc-700' : 'bg-white border-zinc-300'
             }`}
           >
@@ -3661,31 +3704,31 @@ export function Notepad() {
                onPointerDown={handleCalcPointerDown}
                onPointerMove={handleCalcPointerMove}
                onPointerUp={handleCalcPointerUp}
-               className={`px-3 py-1.5 flex items-center justify-between cursor-move select-none border-b ${
+               className={`px-2 py-1 flex items-center justify-between cursor-move select-none border-b ${
                   isDark ? 'bg-zinc-800 border-zinc-700' : 'bg-zinc-100 border-zinc-200'
                }`}
              >
-                <span className={`text-[11px] font-bold flex items-center gap-1.5 ${isDark ? 'text-zinc-300' : 'text-zinc-700'}`}>
-                   <Calculator className="w-3.5 h-3.5 text-accent-500" />
+                <span className={`text-[10px] font-bold flex items-center gap-1 ${isDark ? 'text-zinc-300' : 'text-zinc-700'}`}>
+                   <Calculator className="w-3 h-3 text-accent-500" />
                 </span>
-                <button onPointerDown={(e) => e.stopPropagation()} onClick={() => setShowCalculator(false)} className={`p-1 rounded hover:bg-red-500/10 hover:text-red-500 transition-colors ${isDark ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                   <X className="w-3.5 h-3.5" />
+                <button onPointerDown={(e) => e.stopPropagation()} onClick={() => setShowCalculator(false)} className={`p-0.5 rounded hover:bg-red-500/10 hover:text-red-500 transition-colors ${isDark ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                   <X className="w-3 h-3" />
                 </button>
              </div>
              
-             <div className="p-2">
-                 <div className={`w-full text-right px-2 py-1.5 rounded mb-2 text-base font-mono font-bold tracking-wider overflow-hidden text-ellipsis whitespace-nowrap ${
+             <div className="p-1.5">
+                 <div className={`w-full text-right px-2 py-1 rounded mb-1.5 text-sm font-mono font-bold tracking-wider overflow-hidden text-ellipsis whitespace-nowrap ${
                     isDark ? 'bg-zinc-950 text-accent-400' : 'bg-zinc-100 text-accent-600'
                  }`}>
                     {calcDisplay}
                  </div>
                  
-                 <div className="grid grid-cols-4 gap-1.5">
+                 <div className="grid grid-cols-4 gap-1">
                     {['C', '÷', 'x', '-', '7', '8', '9', '+', '4', '5', '6', '=', '1', '2', '3', '0', '.'].map((btn, i) => (
                        <button 
                          key={i}
                          onClick={() => handleCalcInput(btn)}
-                         className={`py-1.5 rounded font-bold text-xs transition-colors active:scale-95 ${
+                         className={`py-1 rounded font-bold text-[11px] transition-colors active:scale-95 ${
                             btn === '=' 
                                ? `row-span-3 col-start-4 row-start-3 ${isDark ? 'bg-accent-600 hover:bg-accent-500 text-white' : 'bg-accent-500 hover:bg-accent-600 text-white'}`
                                : btn === '0'
