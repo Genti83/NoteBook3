@@ -157,14 +157,14 @@ export function Notepad() {
   
   const [cloudSyncFrequency, setCloudSyncFrequency] = useState<number>(() => {
       const saved = localStorage.getItem('grid_cloud_sync_freq');
-      return saved ? parseInt(saved, 10) : 1500;
+      return saved ? parseInt(saved, 10) : 5000;
   });
   
   const [language, setLanguage] = useState<'sq' | 'en'>(() => (localStorage.getItem('grid_lang') as any) || 'sq');
   const t = (sq: string, en: string) => language === 'en' ? en : sq;
   
   const [downloadMethod, setDownloadMethod] = useState<'auto'|'picker'|'share'|'direct'|'folder'>(() => {
-      return 'folder';
+      return (localStorage.getItem('grid_download_method') as any) || 'folder';
   });
   
   const [folderName, setFolderName] = useState<string>('');
@@ -296,6 +296,7 @@ export function Notepad() {
 
   const handleCalcPointerMove = (e: React.PointerEvent) => {
       if (!isDraggingCalc || !dragRef.current) return;
+      e.preventDefault();
       const dx = e.clientX - dragRef.current.startX;
       const dy = e.clientY - dragRef.current.startY;
       setCalcPos({ x: dragRef.current.initialX + dx, y: dragRef.current.initialY + dy });
@@ -304,7 +305,7 @@ export function Notepad() {
   const handleCalcPointerUp = (e: React.PointerEvent) => {
       setIsDraggingCalc(false);
       dragRef.current = null;
-      e.currentTarget.releasePointerCapture(e.pointerId);
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch(err){}
   };
   
   const cellHoldRef = useRef<NodeJS.Timeout | null>(null);
@@ -732,10 +733,14 @@ export function Notepad() {
       try {
           if (isSignUp) {
               await createUserWithEmailAndPassword(auth, email, password);
-              showToast("Llogaria u krijua!");
+              localStorage.setItem('grid_cloud_sync_freq', '5000');
+              setCloudSyncFrequency(5000);
+              showToast("Llogaria u krijua! Sinkronizimi Cloud (5s Auto-Save) u aktivizua automatikisht!");
           } else {
               await signInWithEmailAndPassword(auth, email, password);
-              showToast("Hyrje e suksesshme!");
+              localStorage.setItem('grid_cloud_sync_freq', '5000');
+              setCloudSyncFrequency(5000);
+              showToast("Hyrje e suksesshme! Sinkronizimi Cloud (5s Auto-Save) u aktivizua!");
           }
           localStorage.setItem('grid_notepad_saved_email', email);
           setAuthModal(false);
@@ -756,7 +761,10 @@ export function Notepad() {
       try {
          const provider = new GoogleAuthProvider();
          await signInWithPopup(auth, provider);
+         localStorage.setItem('grid_cloud_sync_freq', '5000');
+         setCloudSyncFrequency(5000);
          setAuthModal(false);
+         showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud (5s Auto-Save) u aktivizua automatikisht!");
          setTimeout(() => forceCloudBackup(), 1500);
       } catch (err: any) {
          if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/operation-not-supported-in-this-environment') {
@@ -827,7 +835,7 @@ export function Notepad() {
           pendingLocalSaveRef.current = false;
       }, 500);
 
-      const freq = parseInt(localStorage.getItem('grid_cloud_sync_freq') || '500', 10);
+      const freq = parseInt(localStorage.getItem('grid_cloud_sync_freq') || '5000', 10);
       if (freq === -1) return; // Off
 
       setIsSaving(true);
@@ -964,6 +972,17 @@ export function Notepad() {
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
+  };
+
+  const safeFormatDate = (dateVal: any, fmt: string) => {
+    try {
+      if (!dateVal) return '';
+      const d = new Date(dateVal);
+      if (isNaN(d.getTime())) return '';
+      return format(d, fmt);
+    } catch (e) {
+      return '';
+    }
   };
 
   const getEmptyRows = () => {
@@ -1622,7 +1641,7 @@ export function Notepad() {
      documents.forEach((dItem, index) => {
          if (index > 0) txtContent += "\n============================================\n\n";
          txtContent += `Dokumenti: ${dItem.title}\n`;
-         txtContent += `Krijuar: ${format(new Date(dItem.createdAt), 'dd.MM.yyyy HH:mm')}\n\n`;
+         txtContent += `Krijuar: ${safeFormatDate(dItem.createdAt, 'dd.MM.yyyy HH:mm')}\n\n`;
 
          dItem.rows.forEach((r, i) => {
               let hasAny = dItem.headers.some((_, c) => (r[`col${c+1}`] || '').toString().trim());
@@ -2513,8 +2532,8 @@ export function Notepad() {
                              <div className="flex-1">
                                 <h4 className={`font-bold ${textColor}`}>{cDoc.title}</h4>
                                 <div className={`text-xs mt-1 flex items-center gap-3 ${isDark ? "text-zinc-500": "text-zinc-500"}`}>
-                                   <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{format(new Date(cDoc.createdAt), 'dd MMM yyyy')}</span>
-                                   <span className="flex items-center gap-1"><Save className="w-3 h-3" />{format(new Date(cDoc.updatedAt), 'HH:mm')}</span>
+                                   <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{safeFormatDate(cDoc.createdAt, 'dd MMM yyyy')}</span>
+                                   <span className="flex items-center gap-1"><Save className="w-3 h-3" />{safeFormatDate(cDoc.updatedAt, 'HH:mm')}</span>
                                 </div>
                              </div>
                              
@@ -2726,6 +2745,7 @@ export function Notepad() {
                                className={`w-full p-2 mt-1 rounded border text-sm font-medium focus:outline-none transition-colors ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-200 focus:border-sky-500" : "bg-zinc-100 border-zinc-300 text-zinc-800 focus:border-sky-500"}`}
                            >
                                <option value="1500">{t("E Menjëhershme (1.5 sekonda)", "Immediate (1.5 seconds)")}</option>
+                               <option value="5000">{t("Çdo 5 sekonda (Rekomanduar)", "Every 5 seconds (Recommended)")}</option>
                                <option value="10000">{t("Çdo 10 sekonda", "Every 10 seconds")}</option>
                                <option value="30000">{t("Çdo 30 sekonda", "Every 30 seconds")}</option>
                                <option value="60000">{t("Çdo 1 minutë", "Every 1 minute")}</option>
@@ -2764,61 +2784,116 @@ export function Notepad() {
 
                        <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
                        <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-green-500">{t('Menaxhimi Lokal (Ruajtja e Dokumenteve)', 'Local Management (Save Documents)')}</h4>
-                       <div className="px-4 py-2 flex flex-col gap-2">
-                           <div className="flex flex-col gap-1.5 items-start p-2 rounded bg-green-500/10 border border-green-500/20">
-                               <label className="flex items-center gap-2 text-sm cursor-pointer hover:opacity-80 transition-opacity">
-                                   <input type="radio" checked={true} readOnly className="accent-green-500" />
-                                   <span className="leading-tight font-semibold text-green-600 dark:text-green-500">
-                                       Lidh Dosjen e Bllokut (Kërkon Android/PC)
-                                       <br/><span className="text-[10px] text-zinc-500 font-normal">Zgjidh një dosje specifik të telefonit tënd dhe mos pyet më!</span>
-                                   </span>
-                               </label>
-                               <div className="flex flex-col gap-2">
-                                   <button onClick={async () => {
-                                       try {
-                                           if (typeof (window as any).showDirectoryPicker === 'function' && window.self === window.top) {
-                                               const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
-                                               await saveDirectoryHandle(handle);
-                                               setFolderName(handle.name);
-                                               localStorage.setItem('grid_mock_folder', handle.name);
-                                               setDownloadMethod('folder');
-                                               localStorage.setItem('grid_download_method', 'folder');
-                                               showToast("Dosja u Lidh me Sukses!");
-                                           } else {
-                                               document.getElementById('fallback-dir-picker')?.click();
-                                           }
-                                       } catch (e: any) {
-                                           if (e.name !== 'AbortError') {
-                                               document.getElementById('fallback-dir-picker')?.click();
-                                           }
-                                       }
-                                   }} className={`ml-6 px-3 py-1.5 text-xs font-semibold rounded shadow-sm ${isDark ? "bg-green-600 hover:bg-green-500 text-white" : "bg-green-500 hover:bg-green-600 text-white"}`}>
-                                       {folderName ? `Ndrysho Dosjen (Aktuale: ${folderName})` : "Kliko për të zgjedhur Dosjen Ruajtëse"}
-                                   </button>
-                                   <input
-                                       type="file"
-                                       id="fallback-dir-picker"
-                                       className="hidden"
-                                       // @ts-ignore
-                                       webkitdirectory="true"
-                                       directory="true"
-                                       onChange={(e: any) => {
-                                           if (e.target.files && e.target.files.length > 0) {
-                                               const path = e.target.files[0].webkitRelativePath || e.target.files[0].name;
-                                               const folder = path ? path.split('/')[0] : "Dosja e Telefonit";
-                                               setFolderName(folder);
-                                               localStorage.setItem('grid_mock_folder', folder);
-                                               setDownloadMethod('folder');
-                                               localStorage.setItem('grid_download_method', 'folder');
-                                               showToast(`Dosja "${folder}" u lidh me sukses!`);
-                                           }
-                                       }}
-                                   />
-                               </div>
-                           </div>
-                       </div>
+                        <div className="px-4 py-2 flex flex-col gap-4">
+                            {/* PËRZGJEDHJA E METODËS SË RUAJTJES / SHKARKIMIT */}
+                            <div className="flex flex-col gap-2 p-3 rounded-xl border border-zinc-500/20 bg-zinc-500/5 w-full">
+                                <label className={`text-xs font-bold ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
+                                    {t('Mënyra e Shkarkimit / Ruajtjes:', 'Download / Save Method:')}
+                                </label>
+                                <select 
+                                    value={downloadMethod} 
+                                    onChange={(e: any) => {
+                                        const method = e.target.value;
+                                        setDownloadMethod(method);
+                                        localStorage.setItem('grid_download_method', method);
+                                        showToast(`U zgjodh mënyra: ${method}`);
+                                    }}
+                                    className={`w-full p-2 rounded border text-sm font-medium focus:outline-none transition-colors ${
+                                        isDark 
+                                            ? "bg-zinc-800 border-zinc-700 text-zinc-200 focus:border-sky-500" 
+                                            : "bg-white border-zinc-300 text-zinc-800 focus:border-sky-500"
+                                    }`}
+                                >
+                                    <option value="folder">{t('Lokaliteti i Dosjes (Emri i Dosjes me shkrim ose zgjedhje)', 'Folder Location (Manual name or chosen folder)')}</option>
+                                    <option value="share">{t('Ndarja e Sistemit (Share Sheet - Më e mira për Android/Celular)', 'System Share (Share Sheet - Best for Android/Mobile)')}</option>
+                                    <option value="direct">{t('Shkarkim Direkt (Në dosjen e paracaktuar "Downloads")', 'Direct Download (In default "Downloads" folder)')}</option>
+                                    <option value="picker">{t('Dritarja e Ruajtjes (File Picker - Rekomanduar për PC)', 'File Picker Save Dialog (Recommended for PC)')}</option>
+                                    <option value="auto">{t('Zgjedhje Automatike (Auto)', 'Automatic Choice (Auto)')}</option>
+                                </select>
+                                <span className="text-[10px] text-zinc-500 font-normal leading-normal mt-1">
+                                    {downloadMethod === 'share' && t('Këshillë: Kjo hap menunë amtare të Android ku mund të zgjidhni direkt "Save to Files" dhe të caktoni çdo dosje në memorien e telefonit.', 'Tip: This opens the native Android menu where you can directly select "Save to Files" and assign any folder in the phone memory.')}
+                                    {downloadMethod === 'folder' && t('Këshillë: Shton automatikisht emrin ose rrugën e dosjes përpara emrit të skedarit kur ruhet në downloads.', 'Tip: Automatically prepends the folder name/path to the filename when saving to downloads.')}
+                                    {downloadMethod === 'direct' && t('Këshillë: Shkarkon direkt skedarin në dosjen e paracaktuar Downloads pa asnjë pyetje.', 'Tip: Downloads the file directly into the default Downloads folder with no questions asked.')}
+                                </span>
+                            </div>
 
-                       <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
+                            <div className="flex flex-col gap-3 p-3 rounded-xl border border-green-500/20 bg-green-500/10 w-full">
+                                <span className="leading-tight font-bold text-sm text-green-600 dark:text-green-500">
+                                    {t('Vendndodhja dhe Dosja Ruajtëse', 'Storage Location & Folder')}
+                                </span>
+                                
+                                <div className="flex flex-col gap-1.5 w-full">
+                                    <label className={`text-[11px] font-semibold ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                                        {t('Shkruaj manualisht emrin/rrugën e Dosjes për celular (p.sh. Blloku, Shënime):', 'Manually write Folder name/path for mobile (e.g. Notebook, Notes):')}
+                                    </label>
+                                    <input 
+                                        type="text"
+                                        value={folderName}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            setFolderName(val);
+                                            localStorage.setItem('grid_mock_folder', val);
+                                        }}
+                                        placeholder={t('Shkruaj emrin e dosjes këtu...', 'Type folder name here...')}
+                                        className={`w-full p-2 text-xs rounded border transition-colors outline-none ${
+                                            isDark 
+                                                ? "bg-zinc-900 border-zinc-800 text-white placeholder-zinc-600 focus:border-green-500" 
+                                                : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400 focus:border-green-500"
+                                        }`}
+                                    />
+                                </div>
+
+                                <div className="h-px w-full bg-green-500/20 my-1"></div>
+
+                                <div className="flex flex-col gap-2 items-start">
+                                    <span className="text-[11px] font-semibold text-zinc-500">
+                                        {t('Zgjedhja automatike (Për PC ose shfletues të përputhshëm):', 'Automatic picking (For PC or compatible browsers):')}
+                                    </span>
+                                    <button onClick={async () => {
+                                        try {
+                                            if (typeof (window as any).showDirectoryPicker === "function" && window.self === window.top) {
+                                                const handle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
+                                                await saveDirectoryHandle(handle);
+                                                setFolderName(handle.name);
+                                                localStorage.setItem("grid_mock_folder", handle.name);
+                                                setDownloadMethod("folder");
+                                                localStorage.setItem("grid_download_method", "folder");
+                                                showToast("Dosja u Lidh me Sukses!");
+                                            } else {
+                                                document.getElementById("fallback-dir-picker")?.click();
+                                            }
+                                        } catch (e: any) {
+                                            if (e.name !== "AbortError") {
+                                                document.getElementById("fallback-dir-picker")?.click();
+                                            }
+                                        }
+                                    }} className={`px-3 py-1.5 text-xs font-semibold rounded shadow-sm transition-colors ${isDark ? "bg-green-600 hover:bg-green-500 text-white" : "bg-green-500 hover:bg-green-600 text-white"}`}>
+                                        {folderName ? `${t('Ndrysho Dosjen me Picker', 'Change Folder with Picker')} (Aktuale: ${folderName})` : t("Zgjidh Dosjen me Picker", "Choose Folder with Picker")}
+                                    </button>
+                                    <input
+                                        type="file"
+                                        id="fallback-dir-picker"
+                                        className="hidden"
+                                        // @ts-ignore
+                                        webkitdirectory="true"
+                                        directory="true"
+                                        onChange={(e: any) => {
+                                            if (e.target.files && e.target.files.length > 0) {
+                                                const path = e.target.files[0].webkitRelativePath || e.target.files[0].name;
+                                                const folder = path ? path.split("/")[0] : "Dosja e Telefonit";
+                                                setFolderName(folder);
+                                                localStorage.setItem("grid_mock_folder", folder);
+                                                setDownloadMethod("folder");
+                                                localStorage.setItem("grid_download_method", "folder");
+                                                showToast(`Dosja "${folder}" u lidh me sukses!`);
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
                        <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-blue-500">{t('Sistemi & Riparime', 'System & Fixes')}</h4>
                        <button onClick={handleDeleteEmptyDocs} className={`flex items-center gap-3 px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-blue-600 hover:text-white`}>
                            <Trash2 className="w-4 h-4 shrink-0" /> {t('Fshi Dokumentet Bosh', 'Delete Empty Documents')}
@@ -2921,8 +2996,8 @@ export function Notepad() {
                      <div className="flex flex-col flex-1 shadow-none min-w-0 pr-2 gap-0.5">
                         <h3 className={`font-bold text-sm truncate ${textColor}`}>{doc.title}</h3>
                         <div className={`flex flex-row flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
-                           <span className="flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5 shrink-0" /> {format(new Date(doc.createdAt), 'dd MMM yyyy')}</span>
-                           <span className="flex items-center gap-0.5"><Save className="w-2.5 h-2.5 shrink-0" /> {format(new Date(doc.updatedAt), 'HH:mm')}</span>
+                           <span className="flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.createdAt, 'dd MMM yyyy')}</span>
+                           <span className="flex items-center gap-0.5"><Save className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.updatedAt, 'HH:mm')}</span>
                         </div>
                      </div>
                      <button 
@@ -3701,9 +3776,11 @@ export function Notepad() {
             }`}
           >
              <div 
+               style={{ touchAction: 'none' }}
                onPointerDown={handleCalcPointerDown}
                onPointerMove={handleCalcPointerMove}
                onPointerUp={handleCalcPointerUp}
+               onPointerCancel={handleCalcPointerUp}
                className={`px-2 py-1 flex items-center justify-between cursor-move select-none border-b ${
                   isDark ? 'bg-zinc-800 border-zinc-700' : 'bg-zinc-100 border-zinc-200'
                }`}
