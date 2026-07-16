@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getDirectoryHandle, saveDirectoryHandle } from '../lib/directoryFS';
-import { Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen } from 'lucide-react';
+import { Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { auth, db } from '../lib/firebase';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { collection, doc, setDoc, getDocs, deleteDoc, query, where } from 'firebase/firestore';
+import { collection, writeBatch, doc, setDoc, getDocs, getDoc, deleteDoc, query, where } from 'firebase/firestore';
 
 type GridRow = {
   id: string;
@@ -164,7 +164,7 @@ export function Notepad() {
   const t = (sq: string, en: string) => language === 'en' ? en : sq;
   
   const [downloadMethod, setDownloadMethod] = useState<'auto'|'picker'|'share'|'direct'|'folder'>(() => {
-      return (localStorage.getItem('grid_download_method') as 'auto'|'picker'|'share'|'direct'|'folder') || 'auto';
+      return 'folder';
   });
   
   const [folderName, setFolderName] = useState<string>('');
@@ -260,6 +260,52 @@ export function Notepad() {
   const [activeCell, setActiveCell] = useState<{rIndex: number, colKey: string} | null>(null);
   const [modalText, setModalText] = useState('');
   const [previewSelectedRows, setPreviewSelectedRows] = useState(false);
+
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [calcPos, setCalcPos] = useState({ x: 20, y: 120 });
+  const [isDraggingCalc, setIsDraggingCalc] = useState(false);
+  const [calcDisplay, setCalcDisplay] = useState('0');
+  const dragRef = useRef<{startX: number, startY: number, initialX: number, initialY: number} | null>(null);
+
+  const handleCalcInput = (key: string) => {
+      if (key === 'C') {
+          setCalcDisplay('0');
+      } else if (key === '=') {
+          try {
+              const sanitized = calcDisplay.replace(/x/g, '*').replace(/÷/g, '/');
+              const res = new Function(`return ${sanitized}`)();
+              setCalcDisplay(String(Number(res.toFixed(4))));
+          } catch {
+              setCalcDisplay('Gabim');
+          }
+      } else {
+          setCalcDisplay(prev => prev === '0' || prev === 'Gabim' ? key : prev + key);
+      }
+  };
+
+  const handleCalcPointerDown = (e: React.PointerEvent) => {
+      setIsDraggingCalc(true);
+      dragRef.current = {
+          startX: e.clientX,
+          startY: e.clientY,
+          initialX: calcPos.x,
+          initialY: calcPos.y
+      };
+      e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handleCalcPointerMove = (e: React.PointerEvent) => {
+      if (!isDraggingCalc || !dragRef.current) return;
+      const dx = e.clientX - dragRef.current.startX;
+      const dy = e.clientY - dragRef.current.startY;
+      setCalcPos({ x: dragRef.current.initialX + dx, y: dragRef.current.initialY + dy });
+  };
+
+  const handleCalcPointerUp = (e: React.PointerEvent) => {
+      setIsDraggingCalc(false);
+      dragRef.current = null;
+      e.currentTarget.releasePointerCapture(e.pointerId);
+  };
   
   const cellHoldRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -293,6 +339,9 @@ export function Notepad() {
   const [isSaving, setIsSaving] = useState(false);
   const [autoSaveMsg, setAutoSaveMsg] = useState('');
   const autoSaveTimeout = useRef<NodeJS.Timeout | null>(null);
+  const localSaveTimeout = useRef<NodeJS.Timeout | null>(null);
+  const latestDocsRef = useRef<GridDocument[]>([]);
+  const pendingLocalSaveRef = useRef<boolean>(false);
 
   const [pinModal, setPinModal] = useState<{ isOpen: boolean; action: (() => void) | null; type: 'setup' | 'verify' }>({ isOpen: false, action: null, type: 'verify' });
   const [pinInput, setPinInput] = useState('');
@@ -301,11 +350,12 @@ export function Notepad() {
   const [appLockInput, setAppLockInput] = useState('');
 
   const [authModal, setAuthModal] = useState(false);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => localStorage.getItem('grid_notepad_saved_email') || '');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
 
   const [cloudModal, setCloudModal] = useState(false);
+  const [cloudDocToDelete, setCloudDocToDelete] = useState<any>(null);
   const [backupModal, setBackupModal] = useState(false);
   const [blueModal, setBlueModal] = useState(false);
   const [blueText, setBlueText] = useState('');
@@ -567,22 +617,32 @@ export function Notepad() {
      setIsFetchingCloud(false);
   };
 
-  const deleteCloudDoc = async (docId: string) => {
-    if (!confirm("Jeni i sigurt që doni ta fshini këtë dokument përgjithmonë nga Cloud?")) return;
-    try {
-       await deleteDoc(doc(db, 'documents', docId));
-       setCloudDocs(prev => prev.filter(d => d.id !== docId));
-       showToast("Dokumenti u fshi nga Cloud.");
-    } catch (e) {
-       showToast("Gabim gjatë fshirjes nga Cloud.");
-    }
+  const confirmDeleteCloudDoc = async () => {
+     if (!cloudDocToDelete) return;
+     try {
+        await deleteDoc(doc(db, 'documents', cloudDocToDelete.id));
+        setCloudDocs(prev => prev.filter(d => d.id !== cloudDocToDelete.id));
+        setDocuments(prev => {
+            const updated = prev.filter(d => d.id !== cloudDocToDelete.id);
+            localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(updated));
+            return updated;
+        });
+        if (activeDocId === cloudDocToDelete.id) {
+            createNewDocument();
+        }
+        showToast("Dokumenti u fshi përgjithmonë nga Cloud dhe pajisja.");
+     } catch (e) {
+        showToast("Gabim gjatë fshirjes nga Cloud.");
+     }
+     setCloudDocToDelete(null);
   };
 
   const openCloudModal = () => {
      executeProtectedAction(() => {
         setCloudModal(true);
-        if (user) {
-           fetchCloudDocs(user.uid);
+        const currentUser = auth.currentUser;
+        if (currentUser) {
+           fetchCloudDocs(currentUser.uid);
         }
      });
   };
@@ -597,8 +657,48 @@ export function Notepad() {
        setBlueText(savedOrange);
     }
 
-    const unsub = onAuthStateChanged(auth, (u) => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
        setUser(u);
+       if (u) {
+           try {
+               const q = query(collection(db, 'documents'), where('userId', '==', u.uid));
+               const snaps = await getDocs(q);
+               const fetched: GridDocument[] = [];
+               snaps.forEach(s => {
+                  const data = s.data();
+                  if (data) fetched.push(data as GridDocument);
+               });
+               
+               setDocuments(prevLocal => {
+                   const mergedMap = new Map<string, GridDocument>();
+                   prevLocal.forEach(d => mergedMap.set(d.id, d));
+                   
+                   fetched.forEach(d => {
+                       const existing = mergedMap.get(d.id);
+                       if (!existing || new Date(d.updatedAt) > new Date(existing.updatedAt)) {
+                           mergedMap.set(d.id, d);
+                       }
+                   });
+                   
+                   const newMerged = Array.from(mergedMap.values()).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+                   localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(newMerged));
+                   
+                   // Push any newer local docs to cloud silently
+                   newMerged.forEach(async (docObj) => {
+                       const cloudVersion = fetched.find(c => c.id === docObj.id);
+                       if (!cloudVersion || new Date(docObj.updatedAt) > new Date(cloudVersion.updatedAt)) {
+                           try {
+                               await setDoc(doc(db, 'documents', docObj.id), { ...docObj, userId: u.uid });
+                           } catch (e) { console.error("Auto sync push error", e); }
+                       }
+                   });
+                   
+                   return newMerged;
+               });
+           } catch (err) {
+               console.error("Auto sync fetch error", err);
+           }
+       }
     });
     return () => unsub();
   }, []);
@@ -614,6 +714,8 @@ export function Notepad() {
              
              setIsSaving(true);
              setAutoSaveMsg(t('Ruajtur lokalisht (Backup)', 'Saved locally (Backup)'));
+             
+             
              setTimeout(() => {
                  setIsSaving(false);
                  setAutoSaveMsg('');
@@ -635,8 +737,8 @@ export function Notepad() {
               await signInWithEmailAndPassword(auth, email, password);
               showToast("Hyrje e suksesshme!");
           }
+          localStorage.setItem('grid_notepad_saved_email', email);
           setAuthModal(false);
-          setEmail('');
           setPassword('');
           setTimeout(() => forceCloudBackup(), 1500);
       } catch (err: any) {
@@ -645,6 +747,7 @@ export function Notepad() {
           if (err.code === 'auth/weak-password') msg = "Fjalëkalimi është tepër i dobët. (Min. 6 karaktere)";
           if (err.code === 'auth/invalid-email') msg = "Formati i emailit është i pasaktë.";
           if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = "Emaili ose fjalëkalimi i gabuar.";
+          if (err.code === 'auth/operation-not-allowed') msg = "Hyrja me Email është e çaktivizuar. Kyçuni me Google ose aktivizoni Emailin në Firebase Console.";
           showToast(msg);
       }
   };
@@ -656,7 +759,11 @@ export function Notepad() {
          setAuthModal(false);
          setTimeout(() => forceCloudBackup(), 1500);
       } catch (err: any) {
-         showToast("Gabim gjatë hyrjes me Google: " + err.message);
+         if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/operation-not-supported-in-this-environment') {
+             showToast("Hyrja me Google u anulua ose bllokua. Nëse jeni në aplikacionin celular (APK), ju lutem përdorni Email dhe Fjalëkalim për t'u kyçur.");
+         } else {
+             showToast("Gabim gjatë hyrjes me Google: " + err.message);
+         }
       }
   };
 
@@ -693,12 +800,34 @@ export function Notepad() {
       }
   };
 
+  const handleForgotPin = () => {
+       const savedPin = localStorage.getItem('grid_notepad_pin');
+       if (!savedPin) return;
+       const email = user?.email || 'emailin tuaj';
+       showToast(`Sistem: Email u nis në ${email}. (Për test: Kodi juaj është ${savedPin})`);
+  };
+
+  useEffect(() => {
+     if (auth.currentUser && navigator.onLine) {
+        const t = setTimeout(() => {
+           const blueRef = doc(db, 'settings', auth.currentUser!.uid);
+           setDoc(blueRef, { blueText, userId: auth.currentUser!.uid }).catch(()=>{});
+        }, 1500);
+        return () => clearTimeout(t);
+     }
+  }, [blueText]);
+
   const triggerAutoSave = (updatedDocs: GridDocument[]) => {
-      // Shpëtim imediat në localStorage! Nuk përdorim më vonesë (debounce timeout), 
-      // sepse mund të shkaktojë humbje të pjesshme të tekstit në rast rifreskimi direkt!
-      localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(updatedDocs));
+      latestDocsRef.current = updatedDocs;
+      pendingLocalSaveRef.current = true;
       
-      const freq = parseInt(localStorage.getItem('grid_cloud_sync_freq') || '1500', 10);
+      if (localSaveTimeout.current) clearTimeout(localSaveTimeout.current);
+      localSaveTimeout.current = setTimeout(() => {
+          localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(updatedDocs));
+          pendingLocalSaveRef.current = false;
+      }, 500);
+
+      const freq = parseInt(localStorage.getItem('grid_cloud_sync_freq') || '500', 10);
       if (freq === -1) return; // Off
 
       setIsSaving(true);
@@ -706,14 +835,23 @@ export function Notepad() {
       
       if (autoSaveTimeout.current) clearTimeout(autoSaveTimeout.current);
       autoSaveTimeout.current = setTimeout(async () => {
+         const currentUser = auth.currentUser;
          // Auto save (AI/Sync) to cloud if online and logged in
-         if (user && activeDocId && navigator.onLine) {
+         if (currentUser && activeDocId && navigator.onLine) {
             const currentDoc = updatedDocs.find(d => d.id === activeDocId);
             if (currentDoc) {
                try {
-                  const { doc, setDoc } = await import('firebase/firestore');
                   const docRef = doc(db, 'documents', currentDoc.id);
-                  await setDoc(docRef, { ...currentDoc, userId: user.uid });
+                  await setDoc(docRef, { ...currentDoc, userId: currentUser.uid });
+                  setCloudDocs(prev => {
+                     const idx = prev.findIndex(c => c.id === currentDoc.id);
+                     if (idx >= 0) {
+                         const n = [...prev];
+                         n[idx] = { ...currentDoc, userId: currentUser.uid } as any;
+                         return n;
+                     }
+                     return prev;
+                  });
                } catch (e) {
                   console.error("Cloud autosave warning", e);
                }
@@ -724,6 +862,20 @@ export function Notepad() {
          setTimeout(() => setAutoSaveMsg(''), 2000);
       }, freq);
   };
+
+  useEffect(() => {
+     latestDocsRef.current = documents;
+  }, [documents]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+       if (pendingLocalSaveRef.current) {
+           localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(latestDocsRef.current));
+       }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   useEffect(() => {
     const savedDocs = localStorage.getItem('grid_notepad_documents_v2');
@@ -1559,19 +1711,31 @@ export function Notepad() {
   };
 
   const forceCloudBackup = async () => {
-    if (!user) return;
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
     setIsSaving(true);
     setAutoSaveMsg('Po ngarkon në Cloud...');
     let success = true;
-    for (const docObj of documents) {
-        try {
-            const docRef = doc(db, 'documents', docObj.id);
-            await setDoc(docRef, { ...docObj, userId: user.uid });
-        } catch (e) {
-            console.error(e);
-            success = false;
+    
+    try {
+        const chunkSize = 400;
+        for (let i = 0; i < documents.length; i += chunkSize) {
+            const chunk = documents.slice(i, i + chunkSize);
+            const batch = writeBatch(db);
+            chunk.forEach(docObj => {
+                const docRef = doc(db, 'documents', docObj.id);
+                batch.set(docRef, { ...docObj, userId: currentUser.uid });
+            });
+            await batch.commit();
         }
+        
+        const blueRef = doc(db, 'settings', currentUser.uid);
+        await setDoc(blueRef, { blueText: blueText, userId: currentUser.uid });
+    } catch (e) {
+        console.error(e);
+        success = false;
     }
+    
     setIsSaving(false);
     if (success) {
         setAutoSaveMsg('Ngarkuar!');
@@ -1581,6 +1745,43 @@ export function Notepad() {
         showToast("Pati një problem gjatë ngarkimit në Cloud.");
     }
     setTimeout(() => setAutoSaveMsg(''), 3000);
+  };
+
+  const handleFullCloudRestore = async () => {
+      if (!user) {
+          showToast("Kërkohet llogari për të rikthyer nga Cloud!");
+          return;
+      }
+      if (!navigator.onLine) {
+          showToast("Nuk ka internet! Kërkohet lidhje për të rikthyer nga Cloud.");
+          return;
+      }
+      setIsFetchingCloud(true);
+      try {
+          const q = query(collection(db, 'documents'), where('userId', '==', user.uid));
+          const snapshot = await getDocs(q);
+          const cloudData = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as GridDocument));
+          
+          if (cloudData.length > 0) {
+              setDocuments(cloudData);
+              localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(cloudData));
+          }
+          
+          const blueRef = doc(db, 'settings', user.uid);
+          const blueSnap = await getDoc(blueRef);
+          if (blueSnap.exists()) {
+             const bt = blueSnap.data().blueText || '';
+             setBlueText(bt);
+             localStorage.setItem('grid_notepad_blue', bt);
+          }
+          
+          showToast("Të gjitha të dhënat u rikthyen me sukses nga Cloud!");
+          setBackupModal(false);
+      } catch (err: any) {
+          showToast("Gabim gjatë rikthimit: " + err.message);
+      } finally {
+          setIsFetchingCloud(false);
+      }
   };
 
   const handleForceChangePin = () => {
@@ -1852,6 +2053,70 @@ export function Notepad() {
 
   const renderSharedModals = () => (
     <>
+      {/* CONFIRMATION MODAL - DELETE DOC */}
+      {docToDelete && (
+         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+            <div className={`max-w-md w-full p-6 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
+               <h3 className={`text-xl font-bold mb-3 text-red-500`}>{t('Kujdes!', 'Warning!')}</h3>
+               <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                  {t('Jeni i sigurt që doni ta fshini listën: ', 'Are you sure you want to delete the list: ')}
+                  <strong className={isDark ? "text-zinc-200" : "text-zinc-800"}>
+                     "{documents.find(d => d.id === docToDelete)?.title || t('Pa titull', 'Untitled')}"
+                  </strong>
+                  {t('? Ky veprim nuk mund të kthehet mbrapsht.', '? This action cannot be undone.')}
+                  <br /><br />
+                  <span className="text-sm font-medium">Informacion: Ky veprim do të fshijë vetëm këtë listë. Struktura e aplikacionit dhe listat e tjera nuk do të ndryshojnë.</span>
+               </p>
+               <div className="flex justify-end gap-3">
+                  <button onClick={() => setDocToDelete(null)} className={`px-4 py-2 font-medium rounded-lg transition-colors ${isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-zinc-600 hover:bg-zinc-100"}`}>
+                     {t('Anulo', 'Cancel')}
+                  </button>
+                  <button onClick={() => {
+                     const id = docToDelete;
+                     setDocToDelete(null);
+                     const updatedDocs = documents.filter(d => d.id !== id);
+                     setDocuments(updatedDocs);
+                     localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(updatedDocs));
+                     if (user) {
+                        deleteDoc(doc(db, 'documents', id)).catch(() => {});
+                     }
+                     setCloudDocs(prev => prev.filter(d => d.id !== id));
+                     if (activeDocId === id) {
+                         createNewDocument();
+                     }
+                     showToast(t('Dokumenti u fshi!', 'Document deleted!'));
+                  }} className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg transition-colors">
+                     {t('Po, Fshijë', 'Yes, Delete')}
+                  </button>
+               </div>
+            </div>
+         </div>
+      )}
+
+      {/* CONFIRMATION MODAL - DELETE CLOUD DOC */}
+      {cloudDocToDelete && (
+         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+            <div className={`max-w-md w-full p-6 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
+               <h3 className={`text-xl font-bold mb-3 text-red-500`}>{t('Kujdes!', 'Warning!')}</h3>
+               <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                  {t('Jeni i sigurt që doni ta fshini listën përgjithmonë nga Cloud: ', 'Are you sure you want to permanently delete from Cloud: ')}
+                  <strong className={isDark ? "text-zinc-200" : "text-zinc-800"}>
+                     "{cloudDocToDelete.title || t('Pa titull', 'Untitled')}"
+                  </strong>
+                  {t('? Kjo do ta fshijë atë nga cloud-i dhe nga të gjitha pajisjet e lidhura.', '? This will delete it from cloud and all synced devices.')}
+               </p>
+               <div className="flex justify-end gap-3">
+                  <button onClick={() => setCloudDocToDelete(null)} className={`px-4 py-2 font-medium rounded-lg transition-colors ${isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-zinc-600 hover:bg-zinc-100"}`}>
+                     {t('Anulo', 'Cancel')}
+                  </button>
+                  <button onClick={confirmDeleteCloudDoc} className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg transition-colors shadow-lg shadow-red-500/20">
+                     {t('Po, Fshijë nga Cloud', 'Yes, Delete from Cloud')}
+                  </button>
+               </div>
+            </div>
+         </div>
+      )}
+
       {/* ORANGE NOTES MODAL */}
       {blueModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 sm:p-4 animate-in fade-in">
@@ -1920,11 +2185,16 @@ export function Notepad() {
                  pattern="[0-9]*"
                  inputMode="numeric"
                  autoFocus
-                 className={`w-full text-center text-xl tracking-[0.5em] font-bold py-3 px-4 rounded-xl mb-6 border outline-none transition-colors ${
+                 className={`w-full text-center text-xl tracking-[0.5em] font-bold py-3 px-4 rounded-xl mb-4 border outline-none transition-colors ${
                     isDark ? "bg-zinc-950 border-zinc-700 text-white focus:border-accent-500" : "bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-accent-500"
                  }`}
                  onKeyDown={(e) => { if (e.key === 'Enter') handlePinSubmit(); }}
                />
+               {pinModal.type === 'verify' && (
+                  <button onClick={handleForgotPin} className={`w-full text-center text-sm font-medium mb-4 hover:underline ${isDark ? "text-accent-400" : "text-accent-600"}`}>
+                      Harruat PIN? (Dërgo në Email)
+                  </button>
+               )}
 
                <div className="flex justify-end gap-3">
                   <button onClick={() => setPinModal({ isOpen: false, action: null, type: 'verify' })} className={`px-4 py-2.5 font-medium rounded-lg transition-colors ${isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-zinc-600 hover:bg-zinc-100"}`}>
@@ -2152,8 +2422,11 @@ export function Notepad() {
                             <button onClick={() => {forceCloudBackup(); setBackupModal(false)}} className={`flex-1 flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors bg-accent-600 hover:bg-accent-500 text-white shadow-lg shadow-accent-600/20`}>
                                <Cloud className="w-4 h-4" /> {t('Shto në Cloud', 'Push to Cloud')}
                             </button>
+                            <button onClick={handleFullCloudRestore} className={`flex-1 flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors border ${isDark ? "bg-orange-600 hover:bg-orange-500 text-white shadow-md border-transparent" : "bg-orange-500 hover:bg-orange-600 text-white shadow-md font-bold border-transparent"}`}>
+                               <Download className="w-4 h-4" /> {t('Rikthe Ngarko', 'Restore All')}
+                            </button>
                             <button onClick={() => {setBackupModal(false); openCloudModal();}} className={`flex-1 flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors border ${isDark ? "bg-green-600 hover:bg-green-500 text-white shadow-md border-transparent" : "bg-green-500 hover:bg-green-600 text-white shadow-md font-bold border-transparent"}`}>
-                               <Download className="w-4 h-4" /> {t('Listo & Rikthe Online', 'List & Restore Online')}
+                               <FolderOpen className="w-4 h-4" /> {t('Listo Online', 'List Online')}
                             </button>
                          </div>
                       ) : (
@@ -2203,10 +2476,33 @@ export function Notepad() {
                              </div>
                              
                              <div className="flex flex-wrap w-full sm:w-auto items-center justify-end gap-2">
-                                <button onClick={() => deleteCloudDoc(cDoc.id)} className={`p-2 sm:px-3 sm:py-2 text-sm font-medium rounded-lg transition-colors border ${
+                                <button onClick={(e) => {
+                                   e.preventDefault();
+                                   e.stopPropagation();
+                                   executeProtectedAction(() => {
+                                       setCloudDocToDelete(cDoc);
+                                   });
+                                }} className={`p-3 sm:px-4 sm:py-2.5 text-sm font-medium rounded-lg transition-colors border ${
                                    isDark ? "bg-red-600 hover:bg-red-500 text-white shadow-md border-transparent" : "bg-red-500 hover:bg-red-600 text-white shadow-md font-bold border-transparent"
                                 }`} title="Fshi nga Cloud">
-                                   <Trash2 className="w-4 h-4" />
+                                   <Trash2 className="w-5 h-5 sm:w-4 sm:h-4 pointer-events-none" />
+                                </button>
+                                <button onClick={(e) => {
+                                   e.preventDefault();
+                                   e.stopPropagation();
+                                   const existing = documents.findIndex(d => d.id === cDoc.id);
+                                   let newDocs = [...documents];
+                                   if (existing >= 0) newDocs[existing] = cDoc;
+                                   else newDocs.push(cDoc);
+                                   setDocuments(newDocs);
+                                   localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(newDocs));
+                                   openDocument(cDoc);
+                                   setCloudModal(false);
+                                   setAiChatModal(true);
+                                }} className={`p-3 sm:px-4 sm:py-2.5 text-sm font-medium rounded-lg transition-colors border ${
+                                   isDark ? "bg-accent-600 hover:bg-accent-500 text-white shadow-md border-transparent" : "bg-accent-500 hover:bg-accent-600 text-white shadow-md font-bold border-transparent"
+                                }`} title="Analizo me AI (AI Search)">
+                                   <Sparkles className="w-5 h-5 sm:w-4 sm:h-4 pointer-events-none" />
                                 </button>
                                 <button onClick={() => {
                                    const existing = documents.findIndex(d => d.id === cDoc.id);
@@ -2428,80 +2724,55 @@ export function Notepad() {
                        <div className="px-4 py-2 flex flex-col gap-2">
                            <div className="flex flex-col gap-1.5 items-start p-2 rounded bg-green-500/10 border border-green-500/20">
                                <label className="flex items-center gap-2 text-sm cursor-pointer hover:opacity-80 transition-opacity">
-                                   <input type="radio" checked={downloadMethod === 'folder'} onChange={() => { setDownloadMethod('folder'); localStorage.setItem('grid_download_method', 'folder'); }} className="accent-green-500" />
+                                   <input type="radio" checked={true} readOnly className="accent-green-500" />
                                    <span className="leading-tight font-semibold text-green-600 dark:text-green-500">
                                        Lidh Dosjen e Bllokut (Kërkon Android/PC)
                                        <br/><span className="text-[10px] text-zinc-500 font-normal">Zgjidh një dosje specifik të telefonit tënd dhe mos pyet më!</span>
                                    </span>
                                </label>
-                               {downloadMethod === 'folder' && (
-                                   <div className="flex flex-col gap-2">
-                                       <button onClick={async () => {
-                                           try {
-                                               if (typeof (window as any).showDirectoryPicker === 'function' && window.self === window.top) {
-                                                   const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
-                                                   await saveDirectoryHandle(handle);
-                                                   setFolderName(handle.name);
-                                                   localStorage.setItem('grid_mock_folder', handle.name);
-                                                   showToast("Dosja u Lidh me Sukses!");
-                                               } else {
-                                                   document.getElementById('fallback-dir-picker')?.click();
-                                               }
-                                           } catch (e: any) {
-                                               if (e.name !== 'AbortError') {
-                                                   document.getElementById('fallback-dir-picker')?.click();
-                                               }
+                               <div className="flex flex-col gap-2">
+                                   <button onClick={async () => {
+                                       try {
+                                           if (typeof (window as any).showDirectoryPicker === 'function' && window.self === window.top) {
+                                               const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+                                               await saveDirectoryHandle(handle);
+                                               setFolderName(handle.name);
+                                               localStorage.setItem('grid_mock_folder', handle.name);
+                                               setDownloadMethod('folder');
+                                               localStorage.setItem('grid_download_method', 'folder');
+                                               showToast("Dosja u Lidh me Sukses!");
+                                           } else {
+                                               document.getElementById('fallback-dir-picker')?.click();
                                            }
-                                       }} className={`ml-6 px-3 py-1.5 text-xs font-semibold rounded shadow-sm ${isDark ? "bg-green-600 hover:bg-green-500 text-white" : "bg-green-500 hover:bg-green-600 text-white"}`}>
-                                           {folderName ? `Ndrysho Dosjen (Aktuale: ${folderName})` : "Kliko për të zgjedhur Dosjen Ruajtëse"}
-                                       </button>
-                                       <input
-                                           type="file"
-                                           id="fallback-dir-picker"
-                                           className="hidden"
-                                           // @ts-ignore
-                                           webkitdirectory="true"
-                                           directory="true"
-                                           onChange={(e: any) => {
-                                               if (e.target.files && e.target.files.length > 0) {
-                                                   const path = e.target.files[0].webkitRelativePath || e.target.files[0].name;
-                                                   const folder = path ? path.split('/')[0] : "Dosja e Telefonit";
-                                                   setFolderName(folder);
-                                                   localStorage.setItem('grid_mock_folder', folder);
-                                                   showToast(`Dosja "${folder}" u lidh me sukses!`);
-                                               }
-                                           }}
-                                       />
-                                   </div>
-                               )}
+                                       } catch (e: any) {
+                                           if (e.name !== 'AbortError') {
+                                               document.getElementById('fallback-dir-picker')?.click();
+                                           }
+                                       }
+                                   }} className={`ml-6 px-3 py-1.5 text-xs font-semibold rounded shadow-sm ${isDark ? "bg-green-600 hover:bg-green-500 text-white" : "bg-green-500 hover:bg-green-600 text-white"}`}>
+                                       {folderName ? `Ndrysho Dosjen (Aktuale: ${folderName})` : "Kliko për të zgjedhur Dosjen Ruajtëse"}
+                                   </button>
+                                   <input
+                                       type="file"
+                                       id="fallback-dir-picker"
+                                       className="hidden"
+                                       // @ts-ignore
+                                       webkitdirectory="true"
+                                       directory="true"
+                                       onChange={(e: any) => {
+                                           if (e.target.files && e.target.files.length > 0) {
+                                               const path = e.target.files[0].webkitRelativePath || e.target.files[0].name;
+                                               const folder = path ? path.split('/')[0] : "Dosja e Telefonit";
+                                               setFolderName(folder);
+                                               localStorage.setItem('grid_mock_folder', folder);
+                                               setDownloadMethod('folder');
+                                               localStorage.setItem('grid_download_method', 'folder');
+                                               showToast(`Dosja "${folder}" u lidh me sukses!`);
+                                           }
+                                       }}
+                                   />
+                               </div>
                            </div>
-                           <label className="flex items-center gap-2 text-sm cursor-pointer hover:opacity-80 transition-opacity mt-2">
-                               <input type="radio" checked={downloadMethod === 'auto'} onChange={() => { setDownloadMethod('auto'); localStorage.setItem('grid_download_method', 'auto'); }} className="accent-green-500" />
-                               {t('Auto (Rekomanduar sipas pajisjes)', 'Auto (Recommended by Device)')}
-                           </label>
-                           <div className="flex flex-col gap-1.5 items-start">
-                               <label className="flex items-center gap-2 text-sm cursor-pointer hover:opacity-80 transition-opacity">
-                                   <input type="radio" checked={downloadMethod === 'share'} onChange={() => { setDownloadMethod('share'); localStorage.setItem('grid_download_method', 'share'); }} className="accent-green-500" />
-                                   <span className="leading-tight">
-                                       {t('Sistemi Filemanager Internal/Folder (Për Celular)', 'Internal/Folder Filemanager System (Mobile)')}
-                                       <br/><span className="text-[10px] text-zinc-500">{t('Përdor menunë e Share për të zgjedhur vendin', 'Uses Share menu to pick location')}</span>
-                                   </span>
-                               </label>
-                           </div>
-                           <label className="flex items-center gap-2 text-sm cursor-pointer hover:opacity-80 transition-opacity">
-                               <input type="radio" checked={downloadMethod === 'picker'} onChange={() => { setDownloadMethod('picker'); localStorage.setItem('grid_download_method', 'picker'); }} className="accent-green-500" />
-                               <span className="leading-tight">
-                                   {t('Pickloader Storage (Memoria për PC)', 'Pickloader Storage (PC Memory)')}
-                                   <br/><span className="text-[10px] text-zinc-500">{t('Hap dritaren për të zgjedhur dosjen manualisht në PC', 'Opens window to pick local folder on PC')}</span>
-                               </span>
-                           </label>
-                           <label className="flex items-center gap-2 text-sm cursor-pointer hover:opacity-80 transition-opacity">
-                               <input type="radio" checked={downloadMethod === 'direct'} onChange={() => { setDownloadMethod('direct'); localStorage.setItem('grid_download_method', 'direct'); }} className="accent-green-500" />
-                               <span className="leading-tight">
-                                   {t('Download Direkt (Dosja "Downloads")', 'Direct Download ("Downloads" folder)')}
-                                   <br/><span className="text-[10px] text-zinc-500">{t('Shkarkohet direkt pa pyetur për dosje', 'Downloads straight without asking for folder')}</span>
-                               </span>
-                           </label>
                        </div>
 
                        <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
@@ -2611,8 +2882,17 @@ export function Notepad() {
                            <span className="flex items-center gap-0.5"><Save className="w-2.5 h-2.5 shrink-0" /> {format(new Date(doc.updatedAt), 'HH:mm')}</span>
                         </div>
                      </div>
-                     <button onClick={(e) => { e.stopPropagation(); setDocToDelete(doc.id); }} className={`p-1.5 rounded-lg text-zinc-500 hover:text-red-500 transition-colors ${isDark ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}>
-                        <Trash2 className="w-4 h-4" />
+                     <button 
+                        onClick={(e) => { 
+                           e.preventDefault(); 
+                           e.stopPropagation(); 
+                           executeProtectedAction(() => {
+                              setDocToDelete(doc.id);
+                           });
+                        }} 
+                        className={`p-3 -mr-1 rounded-lg text-zinc-500 hover:text-red-500 active:text-red-600 active:bg-red-500/10 transition-colors ${isDark ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}
+                     >
+                        <Trash2 className="w-5 h-5 pointer-events-none" />
                      </button>
                   </div>
                ))}
@@ -2861,6 +3141,11 @@ export function Notepad() {
                isDark ? "bg-zinc-800 hover:bg-zinc-700 text-white shadow-sm border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 font-bold shadow-sm border-transparent"
              }`} title="Shkarko PDF">
                <FileDown className="w-3.5 h-3.5" /> PDF
+             </button>
+             <button onClick={() => setShowCalculator(true)} className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+               isDark ? "hover:bg-accent-800/30 text-accent-500" : "hover:bg-accent-50 text-accent-600"
+             }`} title="Llogaritës (Mini Calculator)">
+               <Calculator className="w-3.5 h-3.5" />
              </button>
              <button onClick={() => executeProtectedAction(() => setBlueModal(true))} className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
                isDark ? "hover:bg-blue-800/30 text-blue-500 hover:text-orange-400" : "hover:bg-blue-50 text-blue-600 hover:text-orange-700"
@@ -3148,37 +3433,7 @@ export function Notepad() {
          </div>
       )}
 
-            {/* CONFIRMATION MODAL - DELETE DOC */}
-      {docToDelete && (
-         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
-            <div className={`max-w-md w-full p-6 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
-               <h3 className={`text-xl font-bold mb-3 text-red-500`}>{t('Kujdes!', 'Warning!')}</h3>
-               <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{t('Jeni i sigurt që doni ta fshini këtë dokument? Ky veprim nuk mund të kthehet mbrapsht.', 'Are you sure you want to delete this document? This action cannot be undone.')}</p>
-               <div className="flex justify-end gap-3">
-                  <button onClick={() => setDocToDelete(null)} className={`px-4 py-2 font-medium rounded-lg transition-colors ${isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-zinc-600 hover:bg-zinc-100"}`}>
-                     {t('Anulo', 'Cancel')}
-                  </button>
-                  <button onClick={() => {
-                     const id = docToDelete;
-                     setDocToDelete(null);
-                     executeProtectedAction(async () => {
-                        const updatedDocs = documents.filter(d => d.id !== id);
-                        setDocuments(updatedDocs);
-                        localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(updatedDocs));
-                        if (user) {
-                           import('firebase/firestore').then(({ deleteDoc, doc }) => {
-                               deleteDoc(doc(db, 'documents', id)).catch(() => {});
-                           });
-                        }
-                        showToast(t('Dokumenti u fshi!', 'Document deleted!'));
-                     });
-                  }} className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg transition-colors">
-                     {t('Po, Fshijë', 'Yes, Delete')}
-                  </button>
-               </div>
-            </div>
-         </div>
-      )}
+
 
 
 
@@ -3234,10 +3489,8 @@ export function Notepad() {
                            showToast(t("Struktura u përditësua nga AI!", "Structure updated by AI!"));
                            
                            // Try saving to cloud
-                           import('firebase/firestore').then(({ setDoc, doc }) => {
-                               const theDoc = updatedDocs.find((x) => x.id === pd.documentId);
-                               if (user && theDoc) setDoc(doc(db, 'documents', theDoc.id), theDoc).catch(()=>console.error('ai header error sync'));
-                           }).catch(()=>console.log('firebase error module'));
+                           const theDoc = updatedDocs.find((x) => x.id === pd.documentId);
+                           if (user && theDoc) setDoc(doc(db, 'documents', theDoc.id), theDoc).catch(()=>console.error('ai header error sync'));
                         });
                   }} className="px-4 py-2 bg-accent-600 hover:bg-accent-500 text-white font-medium rounded-lg transition-colors">
                      {t('Apliko Ndryshimet', 'Apply Changes')}
@@ -3390,6 +3643,65 @@ export function Notepad() {
       )}
 
       {renderSharedModals()}
+
+      {/* CALCULATOR MODAL */}
+      {showCalculator && (
+          <div 
+            style={{ 
+               position: 'fixed', 
+               left: calcPos.x, 
+               top: calcPos.y, 
+               zIndex: 95 
+            }}
+            className={`w-48 sm:w-52 rounded-xl shadow-2xl border flex flex-col overflow-hidden animate-in fade-in zoom-in-95 ${
+               isDark ? 'bg-zinc-900 border-zinc-700' : 'bg-white border-zinc-300'
+            }`}
+          >
+             <div 
+               onPointerDown={handleCalcPointerDown}
+               onPointerMove={handleCalcPointerMove}
+               onPointerUp={handleCalcPointerUp}
+               className={`px-3 py-1.5 flex items-center justify-between cursor-move select-none border-b ${
+                  isDark ? 'bg-zinc-800 border-zinc-700' : 'bg-zinc-100 border-zinc-200'
+               }`}
+             >
+                <span className={`text-[11px] font-bold flex items-center gap-1.5 ${isDark ? 'text-zinc-300' : 'text-zinc-700'}`}>
+                   <Calculator className="w-3.5 h-3.5 text-accent-500" />
+                </span>
+                <button onPointerDown={(e) => e.stopPropagation()} onClick={() => setShowCalculator(false)} className={`p-1 rounded hover:bg-red-500/10 hover:text-red-500 transition-colors ${isDark ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                   <X className="w-3.5 h-3.5" />
+                </button>
+             </div>
+             
+             <div className="p-2">
+                 <div className={`w-full text-right px-2 py-1.5 rounded mb-2 text-base font-mono font-bold tracking-wider overflow-hidden text-ellipsis whitespace-nowrap ${
+                    isDark ? 'bg-zinc-950 text-accent-400' : 'bg-zinc-100 text-accent-600'
+                 }`}>
+                    {calcDisplay}
+                 </div>
+                 
+                 <div className="grid grid-cols-4 gap-1.5">
+                    {['C', '÷', 'x', '-', '7', '8', '9', '+', '4', '5', '6', '=', '1', '2', '3', '0', '.'].map((btn, i) => (
+                       <button 
+                         key={i}
+                         onClick={() => handleCalcInput(btn)}
+                         className={`py-1.5 rounded font-bold text-xs transition-colors active:scale-95 ${
+                            btn === '=' 
+                               ? `row-span-3 col-start-4 row-start-3 ${isDark ? 'bg-accent-600 hover:bg-accent-500 text-white' : 'bg-accent-500 hover:bg-accent-600 text-white'}`
+                               : btn === '0'
+                               ? `col-span-2 ${isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-white' : 'bg-zinc-100 hover:bg-zinc-200 text-zinc-900'}`
+                               : ['C', '÷', 'x', '-', '+'].includes(btn)
+                               ? `${isDark ? 'bg-zinc-800 text-orange-400 hover:bg-zinc-700' : 'bg-zinc-200 text-orange-600 hover:bg-zinc-300'}`
+                               : `${isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-white' : 'bg-zinc-100 hover:bg-zinc-200 text-zinc-900'}`
+                         }`}
+                       >
+                          {btn}
+                       </button>
+                    ))}
+                 </div>
+             </div>
+          </div>
+      )}
 
       {/* TOAST CUSTOM FOR INNER VIEW */}
       {toastMessage && (
