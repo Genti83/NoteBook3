@@ -8,10 +8,14 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     
     match /documents/{documentId} {
-       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+       allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
        allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
        allow update: if isSignedIn() && request.resource.data.userId == request.auth.uid;
        allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /settings/{userId} {
+       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
   }
 }

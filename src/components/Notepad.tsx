@@ -1261,20 +1261,22 @@ export function Notepad() {
                   const base64data = reader.result?.toString().split(',')[1];
                   if (base64data) {
                       try {
-                          const savedFile = await Filesystem.writeFile({
-                              path: filename,
+                          // Get folder name from state/localStorage
+                          const manualFolder = localStorage.getItem('grid_mock_folder') || folderName;
+                          const sanitizedFolder = manualFolder ? manualFolder.replace(/[^a-zA-Z0-9_\s-]/g, '').trim() : '';
+                          const fullPath = sanitizedFolder ? `${sanitizedFolder}/${filename}` : filename;
+                          
+                          await Filesystem.writeFile({
+                              path: fullPath,
                               data: base64data,
-                              directory: Directory.Cache
+                              directory: Directory.Documents,
+                              recursive: true
                           });
-                          await Share.share({
-                              title: shareTitle,
-                              url: savedFile.uri,
-                              dialogTitle: t("Ruaj Skedarin", "Save File")
-                          });
-                          showToast(t("Tani zgjidhni vendin për ta ruajtur.", "Now choose where to save it."));
-                      } catch (e) {
-                          console.error("Capacitor save/share error:", e);
-                          showToast("Gabim gjatë ruajtjes.");
+                          
+                          showToast(t(`Skedari u ruajt me sukses në Documents/${fullPath}`, `Saved to Documents/${fullPath}`));
+                      } catch (e: any) {
+                          console.error("Capacitor save error:", e);
+                          showToast("Gabim gjatë ruajtjes: " + (e.message || "E panjohur"));
                       }
                   }
               };
@@ -2856,8 +2858,8 @@ export function Notepad() {
                                     {t('Vendndodhja dhe Dosja Ruajtëse', 'Storage Location & Folder')}
                                 </span>
                                 {Capacitor.isNativePlatform() && (
-                                    <div className="text-xs font-bold text-orange-600 bg-orange-100 p-2 rounded">
-                                       {t('Në celular, ky konfigurim nuk është i nevojshëm. Zgjedhja e dosjes (File Picker) hapet automatikisht sa herë që shkarkoni një skedar.', 'On mobile, this configuration is not needed. The File Picker opens automatically whenever you download a file.')}
+                                    <div className="text-[11px] font-medium text-blue-600 bg-blue-100 p-2 rounded">
+                                       {t('Në celular (Android), skedarët do të ruhen automatikisht në memorien tuaj te dosja "Documents/EmriQëShkruaniMëPoshtë".', 'On mobile, files will automatically be saved to Documents/FolderYouSpecifyBelow.')}
                                     </div>
                                 )}
 
@@ -2885,6 +2887,7 @@ export function Notepad() {
 
                                 <div className="h-px w-full bg-green-500/20 my-1"></div>
 
+                                {!Capacitor.isNativePlatform() && (
                                 <div className="flex flex-col gap-2 items-start">
                                     <span className="text-[11px] font-semibold text-zinc-500">
                                         {t('Zgjedhja automatike (Për PC ose shfletues të përputhshëm):', 'Automatic picking (For PC or compatible browsers):')}
@@ -2930,6 +2933,7 @@ export function Notepad() {
                                         }}
                                     />
                                 </div>
+                                )}
                             </div>
                         </div>
 
