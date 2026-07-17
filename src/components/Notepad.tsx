@@ -6,6 +6,9 @@ import { format } from 'date-fns';
 import { auth, db } from '../lib/firebase';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { collection, writeBatch, doc, setDoc, getDocs, getDoc, deleteDoc, query, where } from 'firebase/firestore';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 
 type GridRow = {
   id: string;
@@ -825,6 +828,19 @@ export function Notepad() {
      }
   }, [blueText]);
 
+  // Periodic Auto-Backup to Cloud (Firebase)
+  useEffect(() => {
+     if (cloudSyncFrequency === -1 || !auth.currentUser) return;
+     
+     const interval = setInterval(() => {
+         if (documents.length > 0) {
+             forceCloudBackup();
+         }
+     }, cloudSyncFrequency);
+     
+     return () => clearInterval(interval);
+  }, [documents, cloudSyncFrequency]);
+
   const triggerAutoSave = (updatedDocs: GridDocument[]) => {
       latestDocsRef.current = updatedDocs;
       pendingLocalSaveRef.current = true;
@@ -1238,6 +1254,33 @@ export function Notepad() {
 
   const handleDownload = async (blob: Blob, filename: string, mimeType: string, shareTitle: string) => {
       try {
+          if (Capacitor.isNativePlatform()) {
+              const reader = new FileReader();
+              reader.readAsDataURL(blob);
+              reader.onloadend = async () => {
+                  const base64data = reader.result?.toString().split(',')[1];
+                  if (base64data) {
+                      try {
+                          const savedFile = await Filesystem.writeFile({
+                              path: filename,
+                              data: base64data,
+                              directory: Directory.Cache
+                          });
+                          await Share.share({
+                              title: shareTitle,
+                              url: savedFile.uri,
+                              dialogTitle: t("Ruaj Skedarin", "Save File")
+                          });
+                          showToast(t("Tani zgjidhni vendin për ta ruajtur.", "Now choose where to save it."));
+                      } catch (e) {
+                          console.error("Capacitor save/share error:", e);
+                          showToast("Gabim gjatë ruajtjes.");
+                      }
+                  }
+              };
+              return;
+          }
+
           if (downloadMethod === 'folder') {
               let rootHandle = await getDirectoryHandle();
               
@@ -1283,7 +1326,6 @@ export function Notepad() {
                       showToast("Dosja nuk është zgjedhur! Shkoni tek Settings për ta zgjedhur.");
                   }
                   
-                  // Përdor shkarkimin standard nëse dosja nuk u gjet
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
@@ -1299,7 +1341,6 @@ export function Notepad() {
           if (downloadMethod === 'picker') {
               if ('showSaveFilePicker' in window && window.self === window.top) {
                   try {
-                      // Kjo thirrje provon të hapë direkt File Manager (OS Picker)
                       const handle = await (window as any).showSaveFilePicker({
                           suggestedName: filename,
                           types: [{ description: 'File', accept: { [mimeType]: [`.${filename.split('.').pop()}`] } }]
@@ -1321,7 +1362,6 @@ export function Notepad() {
           }
           
           if (downloadMethod === 'auto') {
-               // On PC, try picker first
                if ('showSaveFilePicker' in window && window.self === window.top && !/Mobi/i.test(navigator.userAgent)) {
                    try {
                        const handle = await (window as any).showSaveFilePicker({
@@ -1335,11 +1375,8 @@ export function Notepad() {
                        return;
                    } catch (err: any) {
                         if (err.name === 'AbortError') return;
-                        // fallthrough
                    }
                }
-
-               // On Mobile (or if Picker failed), try share first
                try {
                    const file = new File([blob], filename, { type: mimeType });
                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -1352,7 +1389,6 @@ export function Notepad() {
                    }
                } catch (err: any) {
                    if (err.name === 'AbortError') return;
-                   // fallthrough
                }
           }
 
@@ -1385,8 +1421,6 @@ export function Notepad() {
                           return;
                       } catch (e: any) {
                           if (e.name === 'AbortError') return;
-                          
-                          // Fallback on iframe share errors (NotAllowedError etc)
                           console.error("Share error:", e);
                           showToast(t("Dritarja e ndarjes nuk mbështetet këtu, po shkarkohet direkt.", "Share not supported here, downloading directly."));
                           const url = URL.createObjectURL(blob);
@@ -1417,7 +1451,6 @@ export function Notepad() {
               }
           }
 
-          // Direct Download Fallback / Default
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
@@ -1431,6 +1464,7 @@ export function Notepad() {
           showToast("Gabim gjatë shkarkimit!");
       }
   };
+
 
   const exportTxt = async () => {
     let txt = `${title.toUpperCase()} (90 Rrjeshta)\n\n`;
@@ -2821,6 +2855,12 @@ export function Notepad() {
                                 <span className="leading-tight font-bold text-sm text-green-600 dark:text-green-500">
                                     {t('Vendndodhja dhe Dosja Ruajtëse', 'Storage Location & Folder')}
                                 </span>
+                                {Capacitor.isNativePlatform() && (
+                                    <div className="text-xs font-bold text-orange-600 bg-orange-100 p-2 rounded">
+                                       {t('Në celular, ky konfigurim nuk është i nevojshëm. Zgjedhja e dosjes (File Picker) hapet automatikisht sa herë që shkarkoni një skedar.', 'On mobile, this configuration is not needed. The File Picker opens automatically whenever you download a file.')}
+                                    </div>
+                                )}
+
                                 
                                 <div className="flex flex-col gap-1.5 w-full">
                                     <label className={`text-[11px] font-semibold ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
