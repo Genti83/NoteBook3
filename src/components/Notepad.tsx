@@ -857,7 +857,7 @@ export function Notepad() {
      
      const interval = setInterval(() => {
          if (documents.length > 0) {
-             forceCloudBackup();
+             forceCloudBackup(true);
          }
      }, cloudSyncFrequency);
      
@@ -1788,11 +1788,11 @@ export function Notepad() {
      e.target.value = ''; // reset
   };
 
-  const forceCloudBackup = async () => {
+  const forceCloudBackup = async (silent = false) => {
     const currentUser = auth.currentUser;
     if (!currentUser) return;
     setIsSaving(true);
-    setAutoSaveMsg('Po ngarkon në Cloud...');
+    if (!silent) setAutoSaveMsg('Po ngarkon në Cloud...');
     let success = true;
     
     try {
@@ -1817,10 +1817,10 @@ export function Notepad() {
     setIsSaving(false);
     if (success) {
         setAutoSaveMsg('Ngarkuar!');
-        showToast("Të gjitha dokumentet u ruajtën në Cloud!");
+        if (!silent) showToast("Të gjitha dokumentet u ruajtën në Cloud!");
     } else {
         setAutoSaveMsg('Gabim!');
-        showToast("Pati një problem gjatë ngarkimit në Cloud.");
+        if (!silent) showToast("Pati një problem gjatë ngarkimit në Cloud.");
     }
     setTimeout(() => setAutoSaveMsg(''), 3000);
   };
@@ -2377,10 +2377,10 @@ export function Notepad() {
                    }`}>
                       Google
                    </button>
-                   <p className="text-center text-sm mt-2 text-zinc-500">
-                      {isSignUp ? 'Keni një llogari? ' : 'Nuk keni llogari? '}
-                      <button type="button" onClick={() => setIsSignUp(!isSignUp)} className="text-accent-500 font-bold hover:underline">
-                         {isSignUp ? 'Hyr këtu' : 'Krijo një'}
+                   <p className="text-center text-xs mt-3 text-zinc-500 font-medium bg-zinc-500/10 p-3 rounded-lg">
+                      {isSignUp ? 'Tashmë i keni dhënë informacionet dhe keni një llogari aktive në Firebase? ' : 'Për të pasur akses në sistemin Cloud (Firebase) fillimisht duhet të regjistroheni për të aktivizuar hapësirën tuaj personale. '}
+                      <button type="button" onClick={() => setIsSignUp(!isSignUp)} className="text-accent-500 font-bold hover:underline ml-1">
+                         {isSignUp ? 'Hyr këtu (Login)' : 'Krijo llogari (Register)'}
                       </button>
                    </p>
                 </form>
@@ -2574,6 +2574,18 @@ export function Notepad() {
                    </button>
                 </div>
                 
+                <div className={`p-4 border-b flex flex-wrap gap-2 ${isDark ? "bg-zinc-800/50 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+                    <button onClick={() => {forceCloudBackup(); setCloudModal(false);}} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-accent-600 hover:bg-accent-500 text-white border-transparent" : "bg-accent-500 hover:bg-accent-600 text-white border-transparent"}`}>
+                        <Cloud className="w-4 h-4 inline-block mr-1" /> Ngarko / Save (Backup All)
+                    </button>
+                    <button onClick={() => {handleFullCloudRestore(); setCloudModal(false);}} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-orange-600 hover:bg-orange-500 text-white border-transparent" : "bg-orange-500 hover:bg-orange-600 text-white border-transparent"}`}>
+                        <Download className="w-4 h-4 inline-block mr-1" /> Importo / Download All
+                    </button>
+                    <button onClick={exportAllTxt} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-zinc-700 hover:bg-zinc-600 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 border-transparent"}`}>TXT</button>
+                    <button onClick={exportAllPdf} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-zinc-700 hover:bg-zinc-600 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 border-transparent"}`}>PDF</button>
+                    <button onClick={exportLocalBackup} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-zinc-700 hover:bg-zinc-600 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 border-transparent"}`}>JSON</button>
+                    <button onClick={exportAllCsv} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-zinc-700 hover:bg-zinc-600 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 border-transparent"}`}>CSV</button>
+                </div>
                 <div className="p-5 overflow-y-auto flex-1 flex flex-col gap-3">
                    {isFetchingCloud ? (
                       <div className="flex justify-center items-center py-10">
@@ -2636,13 +2648,13 @@ export function Notepad() {
                                 }} className={`flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors border ${
                                    isDark ? "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-300" : "bg-white hover:bg-zinc-100 border-zinc-300 text-zinc-700"
                                 }`}>
-                                   <FolderDown className="w-4 h-4" /> <span className="sm:hidden lg:inline">Ruaj</span>
+                                   <FolderDown className="w-4 h-4" /> <span className="sm:hidden lg:inline">Ruaj / Save</span>
                                 </button>
                                 <button onClick={() => {
                                    openDocument(cDoc);
                                    setCloudModal(false);
                                 }} className={`flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors bg-accent-600 hover:bg-accent-500 text-white shadow-lg shadow-accent-600/20`}>
-                                   <FolderUp className="w-4 h-4" /> <span className="sm:hidden lg:inline">Hap</span>
+                                   <FolderUp className="w-4 h-4" /> <span className="sm:hidden lg:inline">Hap / Preview</span>
                                 </button>
                              </div>
                          </div>
