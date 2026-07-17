@@ -4,7 +4,7 @@ import { Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Max
 import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { auth, db } from '../lib/firebase';
-import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, User, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { collection, writeBatch, doc, setDoc, getDocs, getDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
@@ -661,6 +661,22 @@ export function Notepad() {
        setBlueText(savedOrange);
     }
 
+    // Handle Google Login Redirect for Capacitor Native
+    if (Capacitor.isNativePlatform()) {
+        getRedirectResult(auth).then((result) => {
+            if (result) {
+                localStorage.setItem('grid_cloud_sync_freq', '5000');
+                showToast("Hyrje e suksesshme me Google (Redirect)!");
+                setCloudModal(true);
+            }
+        }).catch(err => {
+            console.error(err);
+            if (err.code !== 'auth/redirect-cancelled-by-user') {
+                showToast("Gabim nga Google Redirect: " + err.message);
+            }
+        });
+    }
+
     const unsub = onAuthStateChanged(auth, async (u) => {
        setUser(u);
        if (u) {
@@ -748,6 +764,7 @@ export function Notepad() {
           localStorage.setItem('grid_notepad_saved_email', email);
           setAuthModal(false);
           setPassword('');
+          setCloudModal(true);
           setTimeout(() => forceCloudBackup(), 1500);
       } catch (err: any) {
           let msg = "Gabim gjatë procesit: " + err.message;
@@ -763,15 +780,21 @@ export function Notepad() {
   const loginWithGoogle = async () => {
       try {
          const provider = new GoogleAuthProvider();
-         await signInWithPopup(auth, provider);
-         localStorage.setItem('grid_cloud_sync_freq', '5000');
-         setCloudSyncFrequency(5000);
-         setAuthModal(false);
-         showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud (5s Auto-Save) u aktivizua automatikisht!");
-         setTimeout(() => forceCloudBackup(), 1500);
+         if (Capacitor.isNativePlatform()) {
+             showToast("Po hapet llogaria Google...");
+             await signInWithRedirect(auth, provider);
+         } else {
+             await signInWithPopup(auth, provider);
+             localStorage.setItem('grid_cloud_sync_freq', '5000');
+             setCloudSyncFrequency(5000);
+             setAuthModal(false);
+             showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud (5s Auto-Save) u aktivizua automatikisht!");
+             setCloudModal(true);
+             setTimeout(() => forceCloudBackup(), 1500);
+         }
       } catch (err: any) {
          if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/operation-not-supported-in-this-environment') {
-             showToast("Hyrja me Google u anulua ose bllokua. Nëse jeni në aplikacionin celular (APK), ju lutem përdorni Email dhe Fjalëkalim për t'u kyçur.");
+             showToast("Hyrja me Google u anulua ose bllokua. Për celular përdorni Email për t'u kyçur ose provoni prapë.");
          } else {
              showToast("Gabim gjatë hyrjes me Google: " + err.message);
          }
@@ -2886,7 +2909,6 @@ export function Notepad() {
                                 </div>
 
                                 <div className="h-px w-full bg-green-500/20 my-1"></div>
-
                                 {!Capacitor.isNativePlatform() && (
                                 <div className="flex flex-col gap-2 items-start">
                                     <span className="text-[11px] font-semibold text-zinc-500">
