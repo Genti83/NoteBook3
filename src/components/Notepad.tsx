@@ -653,6 +653,13 @@ export function Notepad() {
   };
 
   useEffect(() => {
+    // Auto-login fallback for Capacitor environments that might wipe IndexedDB
+    const savedEmail = localStorage.getItem('grid_notepad_saved_email');
+    const savedPwd = localStorage.getItem('grid_notepad_saved_pwd');
+    if (savedEmail && savedPwd && !auth.currentUser) {
+        signInWithEmailAndPassword(auth, savedEmail, savedPwd).catch(() => {});
+    }
+
     const savedPassword = localStorage.getItem('grid_notepad_pin');
     if (savedPassword) {
        setAppLocked(true);
@@ -668,13 +675,7 @@ export function Notepad() {
 
 
 
-    getRedirectResult(auth).then((result) => {
-        if (result && result.user) {
-            localStorage.setItem('grid_cloud_sync_freq', '5000');
-            setCloudSyncFrequency(5000);
-            showToast("Hyrje e suksesshme me Google! Sinkronizimi u aktivizua.");
-        }
-    }).catch(err => console.error("Redirect error", err));
+
 
     const unsub = onAuthStateChanged(auth, async (u) => {
        setUser(u);
@@ -779,21 +780,19 @@ export function Notepad() {
   const loginWithGoogle = async () => {
       try {
          const provider = new GoogleAuthProvider();
-         if (Capacitor.isNativePlatform()) {
-             await signInWithRedirect(auth, provider);
-         } else {
-             await signInWithPopup(auth, provider);
-             localStorage.setItem('grid_cloud_sync_freq', '5000');
-             setCloudSyncFrequency(5000);
-             setAuthModal(false);
-             showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
-             setTimeout(() => forceCloudBackup(), 1500);
-         }
+         // signInWithPopup usually works better than redirect to avoid getting stuck in Chrome.
+         // If blocked in Native, we catch the error.
+         await signInWithPopup(auth, provider);
+         localStorage.setItem('grid_cloud_sync_freq', '5000');
+         setCloudSyncFrequency(5000);
+         setAuthModal(false);
+         showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
+         setTimeout(() => forceCloudBackup(), 1500);
       } catch (err: any) {
          if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/operation-not-supported-in-this-environment') {
-             showToast("Hyrja me Google u anulua. Provoni përsëri.");
+             showToast("Hyrja me Google u anulua. Ju lutem përdorni Email/Fjalëkalim nëse kjo nuk punon.");
          } else {
-             showToast("Gabim gjatë hyrjes me Google: " + err.message);
+             showToast("Gabim gjatë hyrjes me Google. Përdorni Email/Fjalëkalim për Native: " + err.message);
          }
       }
   };
@@ -2815,7 +2814,10 @@ export function Notepad() {
                       <LogIn className="w-4 h-4" /> <span className="hidden sm:inline">{t('Hyrje', 'Login')}</span>
                    </button>
                ) : (
-                   <button onClick={() => signOut(auth)} className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border ${isDark ? "bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-300" : "bg-white border-zinc-300 hover:bg-zinc-100 text-zinc-700"}`}>
+                   <button onClick={() => {
+                      localStorage.removeItem('grid_notepad_saved_pwd');
+                      signOut(auth);
+                   }} className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border ${isDark ? "bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-300" : "bg-white border-zinc-300 hover:bg-zinc-100 text-zinc-700"}`}>
                       <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">{t('Dil', 'Logout')}</span>
                    </button>
                )}
