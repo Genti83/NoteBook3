@@ -668,6 +668,14 @@ export function Notepad() {
 
 
 
+    getRedirectResult(auth).then((result) => {
+        if (result && result.user) {
+            localStorage.setItem('grid_cloud_sync_freq', '5000');
+            setCloudSyncFrequency(5000);
+            showToast("Hyrje e suksesshme me Google! Sinkronizimi u aktivizua.");
+        }
+    }).catch(err => console.error("Redirect error", err));
+
     const unsub = onAuthStateChanged(auth, async (u) => {
        setUser(u);
        if (u) {
@@ -755,7 +763,7 @@ export function Notepad() {
           localStorage.setItem('grid_notepad_saved_email', email);
           setAuthModal(false);
           setPassword('');
-          setCloudModal(true);
+          // setCloudModal(true);
           setTimeout(() => forceCloudBackup(), 1500);
       } catch (err: any) {
           let msg = "Gabim gjatë procesit: " + err.message;
@@ -771,14 +779,16 @@ export function Notepad() {
   const loginWithGoogle = async () => {
       try {
          const provider = new GoogleAuthProvider();
-         // Use popup for all platforms to avoid redirect loop issues
-         await signInWithPopup(auth, provider);
-         localStorage.setItem('grid_cloud_sync_freq', '5000');
-         setCloudSyncFrequency(5000);
-         setAuthModal(false);
-         showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
-         setCloudModal(true);
-         setTimeout(() => forceCloudBackup(), 1500);
+         if (Capacitor.isNativePlatform()) {
+             await signInWithRedirect(auth, provider);
+         } else {
+             await signInWithPopup(auth, provider);
+             localStorage.setItem('grid_cloud_sync_freq', '5000');
+             setCloudSyncFrequency(5000);
+             setAuthModal(false);
+             showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
+             setTimeout(() => forceCloudBackup(), 1500);
+         }
       } catch (err: any) {
          if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/operation-not-supported-in-this-environment') {
              showToast("Hyrja me Google u anulua. Provoni përsëri.");
