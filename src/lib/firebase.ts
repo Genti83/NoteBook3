@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getAuth, setPersistence, indexedDBLocalPersistence } from 'firebase/auth';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json'; // relative to src/lib/
 
@@ -9,6 +9,6 @@ enableIndexedDbPersistence(db).catch(console.error);
 export const auth = getAuth(app);
 auth.settings.appVerificationDisabledForTesting = true;
 
-setPersistence(auth, browserLocalPersistence).catch((err) => {
+setPersistence(auth, indexedDBLocalPersistence).catch((err) => {
     console.error("Firebase persistence error:", err);
 });

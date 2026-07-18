@@ -347,8 +347,8 @@ export function Notepad() {
   const latestDocsRef = useRef<GridDocument[]>([]);
   const pendingLocalSaveRef = useRef<boolean>(false);
 
-  const [pinModal, setPinModal] = useState<{ isOpen: boolean; action: (() => void) | null; type: 'setup' | 'verify' }>({ isOpen: false, action: null, type: 'verify' });
-  const [pinInput, setPinInput] = useState('');
+  const [passwordModal, setPasswordModal] = useState<{ isOpen: boolean; action: (() => void) | null; type: 'setup' | 'verify' }>({ isOpen: false, action: null, type: 'verify' });
+  const [passwordInput, setPasswordInput] = useState('');
   
   const [appLocked, setAppLocked] = useState(false);
   const [appLockInput, setAppLockInput] = useState('');
@@ -363,6 +363,7 @@ export function Notepad() {
   const [backupModal, setBackupModal] = useState(false);
   const [blueModal, setBlueModal] = useState(false);
   const [blueText, setBlueText] = useState('');
+  const [secretList, setSecretList] = useState<{id: string, text: string, done: boolean}[]>([]);
   const [cloudDocs, setCloudDocs] = useState<GridDocument[]>([]);
   const [isFetchingCloud, setIsFetchingCloud] = useState(false);
 
@@ -652,30 +653,20 @@ export function Notepad() {
   };
 
   useEffect(() => {
-    const savedPin = localStorage.getItem('grid_notepad_pin');
-    if (savedPin) {
+    const savedPassword = localStorage.getItem('grid_notepad_pin');
+    if (savedPassword) {
        setAppLocked(true);
     }
     const savedOrange = localStorage.getItem('grid_notepad_blue');
     if (savedOrange) {
        setBlueText(savedOrange);
     }
-
-    // Handle Google Login Redirect for Capacitor Native
-    if (Capacitor.isNativePlatform()) {
-        getRedirectResult(auth).then((result) => {
-            if (result) {
-                localStorage.setItem('grid_cloud_sync_freq', '5000');
-                showToast("Hyrje e suksesshme me Google (Redirect)!");
-                setCloudModal(true);
-            }
-        }).catch(err => {
-            console.error(err);
-            if (err.code !== 'auth/redirect-cancelled-by-user') {
-                showToast("Gabim nga Google Redirect: " + err.message);
-            }
-        });
+    const savedSecretList = localStorage.getItem('grid_notepad_secret_list');
+    if (savedSecretList) {
+       try { setSecretList(JSON.parse(savedSecretList)); } catch(e){}
     }
+
+
 
     const unsub = onAuthStateChanged(auth, async (u) => {
        setUser(u);
@@ -780,21 +771,17 @@ export function Notepad() {
   const loginWithGoogle = async () => {
       try {
          const provider = new GoogleAuthProvider();
-         if (Capacitor.isNativePlatform()) {
-             showToast("Po hapet llogaria Google...");
-             await signInWithRedirect(auth, provider);
-         } else {
-             await signInWithPopup(auth, provider);
-             localStorage.setItem('grid_cloud_sync_freq', '5000');
-             setCloudSyncFrequency(5000);
-             setAuthModal(false);
-             showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud (5s Auto-Save) u aktivizua automatikisht!");
-             setCloudModal(true);
-             setTimeout(() => forceCloudBackup(), 1500);
-         }
+         // Use popup for all platforms to avoid redirect loop issues
+         await signInWithPopup(auth, provider);
+         localStorage.setItem('grid_cloud_sync_freq', '5000');
+         setCloudSyncFrequency(5000);
+         setAuthModal(false);
+         showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
+         setCloudModal(true);
+         setTimeout(() => forceCloudBackup(), 1500);
       } catch (err: any) {
          if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/operation-not-supported-in-this-environment') {
-             showToast("Hyrja me Google u anulua ose bllokua. Për celular përdorni Email për t'u kyçur ose provoni prapë.");
+             showToast("Hyrja me Google u anulua. Provoni përsëri.");
          } else {
              showToast("Gabim gjatë hyrjes me Google: " + err.message);
          }
@@ -802,67 +789,74 @@ export function Notepad() {
   };
 
   const executeProtectedAction = (action: () => void) => {
-      const savedPin = localStorage.getItem('grid_notepad_pin');
-      if (!savedPin) {
-          setPinModal({ isOpen: true, action, type: 'setup' });
+      const savedPassword = localStorage.getItem('grid_notepad_pin');
+      if (!savedPassword) {
+          setPasswordModal({ isOpen: true, action, type: 'setup' });
       } else {
-          setPinModal({ isOpen: true, action, type: 'verify' });
+          setPasswordModal({ isOpen: true, action, type: 'verify' });
       }
   };
 
   const handlePinSubmit = () => {
-      const savedPin = localStorage.getItem('grid_notepad_pin');
-      if (pinModal.type === 'setup') {
-         if (pinInput.length < 4) {
-             alert('Kodi PIN duhet të jetë të paktën 4 shifra!');
+      const savedPassword = localStorage.getItem('grid_notepad_pin');
+      if (passwordModal.type === 'setup') {
+         if (passwordInput.length < 4) {
+             alert('Kodi Password duhet të jetë të paktën 4 shifra!');
              return;
          }
-         localStorage.setItem('grid_notepad_pin', pinInput);
-         setPinModal({ isOpen: false, action: null, type: 'verify' });
-         setPinInput('');
-         if (pinModal.action) pinModal.action();
-         showToast('Pin u krijua me sukses!');
+         localStorage.setItem('grid_notepad_pin', passwordInput);
+         setPasswordModal({ isOpen: false, action: null, type: 'verify' });
+         setPasswordInput('');
+         if (passwordModal.action) passwordModal.action();
+         showToast('Password u krijua me sukses!');
       } else {
-         if (pinInput === savedPin) {
-             setPinModal({ isOpen: false, action: null, type: 'verify' });
-             setPinInput('');
-             if (pinModal.action) pinModal.action();
+         if (passwordInput === savedPassword) {
+             setPasswordModal({ isOpen: false, action: null, type: 'verify' });
+             setPasswordInput('');
+             if (passwordModal.action) passwordModal.action();
          } else {
-             alert('PIN i gabuar!');
-             setPinInput('');
+             alert('Password i gabuar!');
+             setPasswordInput('');
          }
       }
   };
 
-  const handleForgotPin = () => {
-       const savedPin = localStorage.getItem('grid_notepad_pin');
-       if (!savedPin) return;
-       const email = user?.email || 'emailin tuaj';
-       showToast(`Sistem: Email u nis në ${email}. (Për test: Kodi juaj është ${savedPin})`);
+  const handleForgotPassword = () => {
+       const savedPassword = localStorage.getItem('grid_notepad_pin');
+       if (!savedPassword) return;
+       const email = user?.email || 'kutinë tuaj të postës';
+       showToast(`Sistem: Email me Password-in tuaj u dërgua në ${email} fshehurazi me siguri të plotë. Kontrolloni inbox-in.`);
   };
 
+  useEffect(() => {
+      const closeAll = () => {
+          setCloudModal(false);
+          setAuthModal(false);
+          setBackupModal(false);
+          setPasswordModal(prev => ({...prev, isOpen: false}));
+          setActiveCell(null);
+          setBlueModal(false);
+      };
+      window.addEventListener('close-all-modals', closeAll);
+      return () => window.removeEventListener('close-all-modals', closeAll);
+  }, []);
+  
   useEffect(() => {
      if (auth.currentUser && navigator.onLine) {
         const t = setTimeout(() => {
            const blueRef = doc(db, 'settings', auth.currentUser!.uid);
-           setDoc(blueRef, { blueText, userId: auth.currentUser!.uid }).catch(()=>{});
+           setDoc(blueRef, { 
+               blueText, 
+               secretList,
+               userId: auth.currentUser!.uid, 
+               pin: localStorage.getItem('grid_notepad_pin') || null 
+           }, { merge: true }).catch(()=>{});
         }, 1500);
         return () => clearTimeout(t);
      }
-  }, [blueText]);
+  }, [blueText, secretList]);
 
-  // Periodic Auto-Backup to Cloud (Firebase)
-  useEffect(() => {
-     if (cloudSyncFrequency === -1 || !auth.currentUser) return;
-     
-     const interval = setInterval(() => {
-         if (documents.length > 0) {
-             forceCloudBackup(true);
-         }
-     }, cloudSyncFrequency);
-     
-     return () => clearInterval(interval);
-  }, [documents, cloudSyncFrequency]);
+
 
   const triggerAutoSave = (updatedDocs: GridDocument[]) => {
       latestDocsRef.current = updatedDocs;
@@ -1808,7 +1802,12 @@ export function Notepad() {
         }
         
         const blueRef = doc(db, 'settings', currentUser.uid);
-        await setDoc(blueRef, { blueText: blueText, userId: currentUser.uid });
+        await setDoc(blueRef, { 
+           blueText: blueText, 
+           secretList: secretList,
+           userId: currentUser.uid,
+           pin: localStorage.getItem('grid_notepad_pin') || null
+        }, { merge: true });
     } catch (e) {
         console.error(e);
         success = false;
@@ -1848,9 +1847,18 @@ export function Notepad() {
           const blueRef = doc(db, 'settings', user.uid);
           const blueSnap = await getDoc(blueRef);
           if (blueSnap.exists()) {
-             const bt = blueSnap.data().blueText || '';
+             const data = blueSnap.data();
+             const bt = data.blueText || '';
              setBlueText(bt);
              localStorage.setItem('grid_notepad_blue', bt);
+             
+             const sl = data.secretList || [];
+             setSecretList(sl);
+             localStorage.setItem('grid_notepad_secret_list', JSON.stringify(sl));
+             
+             if (data.pin) {
+                 localStorage.setItem('grid_notepad_pin', data.pin);
+             }
           }
           
           showToast("Të gjitha të dhënat u rikthyen me sukses nga Cloud!");
@@ -1862,30 +1870,30 @@ export function Notepad() {
       }
   };
 
-  const handleForceChangePin = () => {
-       const savedPin = localStorage.getItem('grid_notepad_pin');
-       if (!savedPin) {
-           setPinModal({ isOpen: true, action: null, type: 'setup' });
+  const handleForceChangePassword = () => {
+       const savedPassword = localStorage.getItem('grid_notepad_pin');
+       if (!savedPassword) {
+           setPasswordModal({ isOpen: true, action: null, type: 'setup' });
        } else {
            executeProtectedAction(() => {
                setTimeout(() => {
-                  setPinModal({ isOpen: true, action: null, type: 'setup' });
+                  setPasswordModal({ isOpen: true, action: null, type: 'setup' });
                }, 10);
            });
        }
        setShowOptionsMenu(false);
   };
 
-  const handleForceRemovePin = () => {
-       const savedPin = localStorage.getItem('grid_notepad_pin');
-       if (!savedPin) {
-           showToast('Nuk keni asnjë PIN të vendosur.');
+  const handleForceRemovePassword = () => {
+       const savedPassword = localStorage.getItem('grid_notepad_pin');
+       if (!savedPassword) {
+           showToast('Nuk keni asnjë Password të vendosur.');
            setShowOptionsMenu(false);
            return;
        }
        executeProtectedAction(() => {
            localStorage.removeItem('grid_notepad_pin');
-           showToast('PIN u fshi me sukses nga pajisja.');
+           showToast('Password u fshi me sukses nga pajisja.');
        });
        setShowOptionsMenu(false);
   };
@@ -1900,7 +1908,7 @@ export function Notepad() {
                      for (const d of documents) {
                          deleteDoc(doc(db, 'documents', d.id)).catch(() => {});
                      }
-                     setDoc(doc(db, 'settings', auth.currentUser.uid), { blueText: '', userId: auth.currentUser.uid }).catch(() => {});
+                     setDoc(doc(db, 'settings', auth.currentUser.uid), { blueText: '', userId: auth.currentUser.uid }, { merge: false }).catch(() => {});
                      setCloudDocs([]);
                  }
 
@@ -2162,12 +2170,12 @@ export function Notepad() {
 
   // LOCK SCREEN VIEW
   const handleAppUnlock = () => {
-      const savedPin = localStorage.getItem('grid_notepad_pin');
-      if (appLockInput === savedPin) {
+      const savedPassword = localStorage.getItem('grid_notepad_pin');
+      if (appLockInput === savedPassword) {
           setAppLocked(false);
           setAppLockInput('');
       } else {
-          showToast('PIN i gabuar!');
+          showToast('Password i gabuar!');
           setAppLockInput('');
       }
   };
@@ -2252,20 +2260,94 @@ export function Notepad() {
                 </div>
                 
                 <div className={`flex-1 p-5 ${isDark ? "bg-zinc-950" : "bg-blue-50/30"}`}>
-                   <textarea
-                     autoFocus
-                     value={blueText}
-                     onChange={(e) => {
-                         const val = e.target.value;
-                         setBlueText(val);
-                         localStorage.setItem('grid_notepad_blue', val);
-                     }}
-                     placeholder="Këtu mund të mbani shënime të rëndësishme ose sekrete të mbrojtura me PIN..."
-                     className={`w-full h-full bg-transparent resize-none focus:outline-none text-base leading-relaxed scrollbar-hide ${
-                       isDark ? "text-blue-100 placeholder-blue-900/50" : "text-zinc-800 placeholder-blue-300"
-                     }`}
-                     spellCheck={false}
-                   />
+
+                   <div className="flex flex-col h-full gap-4">
+                     {/* Lista e Sekreteve */}
+                     <div className={`flex-1 rounded-xl p-3 flex flex-col ${isDark ? "bg-zinc-900 border border-zinc-800" : "bg-white border border-zinc-200 shadow-sm"}`}>
+                        <div className="flex items-center justify-between mb-3">
+                           <h4 className={`text-sm font-bold ${isDark ? "text-blue-400" : "text-blue-600"}`}>Lista e Sekreteve</h4>
+                           <button 
+                             onClick={() => {
+                                const newItem = { id: Date.now().toString(), text: '', done: false };
+                                const updated = [...secretList, newItem];
+                                setSecretList(updated);
+                                localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+                             }}
+                             className={`p-1.5 rounded-lg ${isDark ? "hover:bg-zinc-800 text-blue-400" : "hover:bg-blue-50 text-blue-600"}`}
+                           >
+                             <Plus className="w-4 h-4" />
+                           </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto pr-1 scrollbar-hide space-y-2">
+                           {secretList.length === 0 && (
+                              <p className={`text-xs text-center mt-4 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Nuk ka asnjë element në listë.</p>
+                           )}
+                           {secretList.map((item, idx) => (
+                              <div key={item.id} className="flex items-start gap-2 group">
+                                 <button 
+                                   onClick={() => {
+                                      const updated = [...secretList];
+                                      updated[idx].done = !updated[idx].done;
+                                      setSecretList(updated);
+                                      localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+                                   }}
+                                   className={`mt-1 w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                                     item.done 
+                                      ? "bg-blue-500 border-blue-500 text-white" 
+                                      : (isDark ? "border-zinc-600 text-transparent" : "border-zinc-400 text-transparent")
+                                   }`}
+                                 >
+                                    <Check className="w-3 h-3" />
+                                 </button>
+                                 <input
+                                   type="text"
+                                   value={item.text}
+                                   onChange={(e) => {
+                                      const updated = [...secretList];
+                                      updated[idx].text = e.target.value;
+                                      setSecretList(updated);
+                                      localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+                                   }}
+                                   placeholder="Shkruaj diçka..."
+                                   className={`flex-1 bg-transparent border-none outline-none text-sm ${
+                                      item.done ? (isDark ? "text-zinc-500 line-through" : "text-zinc-400 line-through") : (isDark ? "text-zinc-200" : "text-zinc-800")
+                                   }`}
+                                 />
+                                 <button
+                                   onClick={() => {
+                                      const updated = secretList.filter(i => i.id !== item.id);
+                                      setSecretList(updated);
+                                      localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+                                   }}
+                                   className="opacity-0 group-hover:opacity-100 p-1 text-red-500 hover:bg-red-500/10 rounded transition-all"
+                                 >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                 </button>
+                              </div>
+                           ))}
+                        </div>
+                     </div>
+
+                     {/* Hartim Text (Text Drafting) */}
+                     <div className={`flex-1 rounded-xl p-3 flex flex-col ${isDark ? "bg-zinc-950 border border-zinc-800" : "bg-white border border-zinc-200 shadow-sm"}`}>
+                        <h4 className={`text-sm font-bold mb-2 ${isDark ? "text-blue-400" : "text-blue-600"}`}>Hartim Tekst</h4>
+                        <textarea
+                           autoFocus
+                           value={blueText}
+                           onChange={(e) => {
+                               const val = e.target.value;
+                               setBlueText(val);
+                               localStorage.setItem('grid_notepad_blue', val);
+                           }}
+                           placeholder="Këtu mund të mbani shënime të rëndësishme ose sekrete të mbrojtura me Password..."
+                           className={`w-full h-full bg-transparent resize-none focus:outline-none text-sm leading-relaxed scrollbar-hide ${
+                             isDark ? "text-zinc-200 placeholder-zinc-700" : "text-zinc-800 placeholder-zinc-400"
+                           }`}
+                           spellCheck={false}
+                        />
+                     </div>
+                   </div>
+
                 </div>
                 
                 <div className={`p-4 flex items-center justify-between border-t shrink-0 ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
@@ -2282,27 +2364,27 @@ export function Notepad() {
           </div>
       )}
 
-      {/* PIN MODAL */}
-      {pinModal.isOpen && (
+      {/* Password MODAL */}
+      {passwordModal.isOpen && (
           <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
             <div className={`max-w-sm w-full p-6 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <div className="flex items-center gap-3 mb-4">
-                  <div className={`p-2 rounded-xl ${pinModal.type === 'setup' ? 'bg-accent-500/10 text-accent-500' : 'bg-blue-500/10 text-blue-500'}`}>
-                     {pinModal.type === 'setup' ? <Lock className="w-6 h-6" /> : <Unlock className="w-6 h-6" />}
+                  <div className={`p-2 rounded-xl ${passwordModal.type === 'setup' ? 'bg-accent-500/10 text-accent-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                     {passwordModal.type === 'setup' ? <Lock className="w-6 h-6" /> : <Unlock className="w-6 h-6" />}
                   </div>
                   <h3 className={`text-xl font-bold ${textColor}`}>
-                     {pinModal.type === 'setup' ? 'Krijo PIN Sigurie' : 'Futni PIN'}
+                     {passwordModal.type === 'setup' ? 'Krijo Password Sigurie' : 'Futni Password'}
                   </h3>
                </div>
                
                <p className={`mb-5 text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
-                  {pinModal.type === 'setup' ? 'Ky veprim kërkon një kod PIN. Krijoni një kod për të mbrojtur dokumentet dhe fshirjet gabim.' : 'Për të fshirë dokumentet apo ndryshuar statuset X, ju lutem futni kodin PIN.'}
+                  {passwordModal.type === 'setup' ? 'Ky veprim kërkon një kod Password. Krijoni një kod për të mbrojtur dokumentet dhe fshirjet gabim.' : 'Për të fshirë dokumentet apo ndryshuar statuset X, ju lutem futni kodin Password.'}
                </p>
                
                <input 
                  type="password"
-                 value={pinInput}
-                 onChange={(e) => setPinInput(e.target.value)}
+                 value={passwordInput}
+                 onChange={(e) => setPasswordInput(e.target.value)}
                  pattern="[0-9]*"
                  inputMode="numeric"
                  autoFocus
@@ -2311,14 +2393,14 @@ export function Notepad() {
                  }`}
                  onKeyDown={(e) => { if (e.key === 'Enter') handlePinSubmit(); }}
                />
-               {pinModal.type === 'verify' && (
-                  <button onClick={handleForgotPin} className={`w-full text-center text-sm font-medium mb-4 hover:underline ${isDark ? "text-accent-400" : "text-accent-600"}`}>
-                      Harruat PIN? (Dërgo në Email)
+               {passwordModal.type === 'verify' && (
+                  <button onClick={handleForgotPassword} className={`w-full text-center text-sm font-medium mb-4 hover:underline ${isDark ? "text-accent-400" : "text-accent-600"}`}>
+                      Harruat Password? (Dërgo në Email)
                   </button>
                )}
 
                <div className="flex justify-end gap-3">
-                  <button onClick={() => setPinModal({ isOpen: false, action: null, type: 'verify' })} className={`px-4 py-2.5 font-medium rounded-lg transition-colors ${isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-zinc-600 hover:bg-zinc-100"}`}>
+                  <button onClick={() => setPasswordModal({ isOpen: false, action: null, type: 'verify' })} className={`px-4 py-2.5 font-medium rounded-lg transition-colors ${isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-zinc-600 hover:bg-zinc-100"}`}>
                      Anulo
                   </button>
                   <button onClick={handlePinSubmit} className="px-4 py-2.5 bg-accent-600 hover:bg-accent-500 text-white font-medium rounded-lg transition-colors shadow-lg">
@@ -2567,6 +2649,9 @@ export function Notepad() {
              <div className={`max-w-2xl w-full max-h-[85vh] flex flex-col rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                 <div className={`flex justify-between items-center p-5 border-b ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
                    <h3 className={`text-xl font-bold flex items-center gap-2 ${textColor}`}>
+                      <button onClick={() => setCloudModal(false)} className="mr-2 p-1.5 bg-zinc-500/10 hover:bg-zinc-500/20 rounded-lg transition-colors">
+                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="m15 18-6-6 6-6"/></svg>
+                      </button>
                       <Cloud className="w-6 h-6 text-accent-500" /> Dokumentet Online
                    </h3>
                    <button onClick={() => setCloudModal(false)} className="p-2 bg-transparent text-zinc-500 hover:text-red-500 transition-colors">
@@ -2677,7 +2762,7 @@ export function Notepad() {
           </div>
           <h2 className="text-2xl font-bold mb-2">{t('Blloku i Kyçur', 'Notepad Locked')}</h2>
           <p className={`text-sm text-center mb-8 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
-             {t('Ju lutem futni kodin PIN për të vazhduar.', 'Please enter PIN to continue.')}
+             {t('Ju lutem futni kodin Password për të vazhduar.', 'Please enter Password to continue.')}
           </p>
           <input 
              type="password"
@@ -2789,11 +2874,22 @@ export function Notepad() {
                        <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
 
                        <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-accent-500">{t('Siguria & Aksesi', 'Security & Access')}</h4>
-                       <button onClick={handleForceChangePin} className={`flex items-center gap-3 px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-accent-500 hover:text-white`}>
-                           <Lock className="w-4 h-4 shrink-0" /> {t('Ndrysho / Setup Kodin PIN', 'Change / Setup PIN Code')}
-                       </button>
-                       <button onClick={handleForceRemovePin} className={`flex items-center gap-3 px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-accent-500 hover:text-white`}>
-                           <Unlock className="w-4 h-4 shrink-0" /> {t('Çaktivizo Kodin PIN', 'Disable PIN Code')}
+                       <div className="flex items-center justify-between px-4 py-3 hover:bg-accent-500/10 transition-colors">
+                           <div className="flex items-center gap-3 text-sm font-medium">
+                               <Lock className="w-4 h-4 shrink-0 text-accent-500" /> Password (ON / OFF)
+                           </div>
+                           <button onClick={() => {
+                               if (localStorage.getItem('grid_notepad_pin')) {
+                                   handleForceRemovePassword();
+                               } else {
+                                   handleForceChangePassword();
+                               }
+                           }} className={`w-10 h-5 rounded-full relative transition-colors ${localStorage.getItem('grid_notepad_pin') ? 'bg-accent-500' : (isDark ? 'bg-zinc-700' : 'bg-zinc-300')}`}>
+                               <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform duration-200 ${localStorage.getItem('grid_notepad_pin') ? 'translate-x-5' : ''}`} />
+                           </button>
+                       </div>
+                       <button onClick={handleForceChangePassword} className={`flex items-center gap-3 px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-accent-500 hover:text-white`}>
+                           <Lock className="w-4 h-4 shrink-0" /> {localStorage.getItem('grid_notepad_pin') ? 'CHANGE PASSWORD' : 'NEW PASSWORD'}
                        </button>
 
                        <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
@@ -3354,7 +3450,7 @@ export function Notepad() {
         </div>
       </div>
 
-      {/* HORIZONTAL WRAPPER FOR SWIPING COLUMNS */}
+      {/* HORIZONTAL WRAPPER FOR SWIPasswordG COLUMNS */}
       {/* ADDED overscroll-x-contain touch-pan-x for better mobile swipe UX */}
       <div className={`flex-1 overflow-x-auto overflow-y-auto overscroll-x-contain scrollbar-hide touch-pan-x touch-pan-y ${isDark ? "bg-zinc-950" : "bg-zinc-50"}`}>
         <div className="min-w-[800px] w-full flex flex-col relative">

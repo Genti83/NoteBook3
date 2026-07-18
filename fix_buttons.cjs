@@ -1,85 +1,39 @@
 const fs = require('fs');
-
 let code = fs.readFileSync('src/components/Notepad.tsx', 'utf8');
 
-const searchRegex = /<button onClick=\{\(\) => updateSelectedRowsStatus\('none'\)\} className=\{`p-1\.5 round[\s\S]*?<Plus className="w-3\.5 h-3\.5 border border-current rounded-full" \/>\s*<\/button>\s*<\/div>/;
+const modalTitles = [
+  '<Cloud className="w-6 h-6 text-accent-500" /> Dokumentet Online',
+  'Menaxho Llogarinë Google Cloud',
+  'Backup i Fshehtë dhe Rikthim Manual',
+  '{passwordModal.type === \'setup\' ? \'Krijo Password Sigurie\' : \'Futni Password\'}',
+  'Cilësimet (Settings)'
+];
 
-const replacement = `<button onClick={() => updateSelectedRowsStatus('none')} className={\`p-1.5 rounded transition-colors \${isDark ? "bg-zinc-700 text-white hover:bg-zinc-600 shadow-sm font-bold" : "bg-zinc-300 text-zinc-900 hover:bg-zinc-400 shadow-sm font-bold"}\`} title="Hiq Statusin">
-               <Unlock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-            </button>
-            <div className="h-4 w-px bg-zinc-500/30 mx-1"></div>
+const backButtonSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" className="w-5 h-5"><path d="m15 18-6-6 6-6"/></svg>`;
 
-             <div className="flex flex-wrap items-center gap-2 border-r pr-2 border-zinc-500/30">
-                  <div className="flex items-center gap-1">
-                     <span className="text-[10px] text-zinc-500 font-bold tracking-wider uppercase mr-1 hidden sm:inline" title="Kolonat">K:</span>
-                     <button onClick={() => {
-                        executeProtectedAction(() => {
-                            if(headers.length > 2) {
-                                const newH = [...headers];
-                                newH.pop();
-                                setHeaders(newH);
-                                const newW = [...columnWidths];
-                                newW.pop();
-                                setColumnWidths(newW);
-                                updateActiveDocumentState(title, rows, newH, newW);
-                            }
-                        });
-                     }} title={t("Hiq Kolonë", "Remove Column")} className={\`p-1.5 rounded transition-colors shadow-sm font-bold \${isDark ? "bg-zinc-700 text-white hover:bg-zinc-600" : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"}\`}>
-                        <Minus className="w-3.5 h-3.5" />
-                     </button>
-                     <span className={\`text-[11px] font-bold min-w-[12px] text-center px-1 \${isDark ? "text-zinc-300" : "text-zinc-700"}\`}>{headers.length}</span>
-                     <button onClick={() => {
-                        executeProtectedAction(() => {
-                            if(headers.length < 8) {
-                                const newH = [...headers, \`\${t('Kolona', 'Col')} \${headers.length + 1}\`];
-                                setHeaders(newH);
-                                const newW = [...columnWidths, 150];
-                                setColumnWidths(newW);
-                                updateActiveDocumentState(title, rows, newH, newW);
-                            }
-                        });
-                     }} title={t("Shto Kolonë", "Add Column")} className={\`p-1.5 rounded transition-colors shadow-sm font-bold \${isDark ? "bg-zinc-700 text-white hover:bg-zinc-600" : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"}\`}>
-                        <Plus className="w-3.5 h-3.5" />
-                     </button>
-                  </div>
-             </div>
-             
-             <div className="flex flex-wrap items-center gap-2 lg:pr-0 border-zinc-500/30">
-                  <div className="flex items-center gap-1">
-                     <span className="text-[10px] text-zinc-500 font-bold tracking-wider uppercase mr-1 hidden sm:inline" title="Rrjeshtat">R:</span>
-                     <button onClick={() => {
-                        executeProtectedAction(() => {
-                            if(rows.length > 10) {
-                                const newR = [...rows];
-                                newR.splice(-10); // Remove last 10
-                                setRows(newR);
-                                updateActiveDocumentState(title, newR, headers);
-                                showToast(t("U hoqën 10 rrjeshta", "Removed 10 rows"));
-                            }
-                        });
-                     }} title={t("Hiq 10 Rrjeshta", "Remove 10 Rows")} className={\`p-1.5 rounded transition-colors shadow-sm font-bold \${isDark ? "bg-zinc-700 text-white hover:bg-zinc-600" : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"}\`}>
-                        <Minus className="w-3.5 h-3.5" />
-                     </button>
-                     <span className={\`text-[11px] font-bold min-w-[20px] text-center px-1 \${isDark ? "text-zinc-300" : "text-zinc-700"}\`}>{rows.length}</span>
-                     <button onClick={() => {
-                        executeProtectedAction(() => {
-                            if(rows.length < 500) {
-                                const newR = [...rows];
-                                const startId = rows.length;
-                                for(let i = 0; i < 10; i++) {
-                                   newR.push({ id: \`row-\${startId + i}\`, status: 'none' as const, image: '' });
-                                }
-                                setRows(newR);
-                                updateActiveDocumentState(title, newR, headers);
-                                showToast(t("U shtuan 10 rrjeshta", "Added 10 rows"));
-                            }
-                        });
-                     }} title={t("Shto 10 Rrjeshta", "Add 10 Rows")} className={\`p-1.5 rounded transition-colors shadow-sm font-bold \${isDark ? "bg-zinc-700 text-white hover:bg-zinc-600" : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"}\`}>
-                        <Plus className="w-3.5 h-3.5" />
-                     </button>
-                  </div>
-             </div>`;
+code = code.replace(
+  /<Cloud className="w-6 h-6 text-accent-500" \/> Dokumentet Online/g,
+  `<button onClick={() => setCloudModal(false)} className="mr-2 p-1.5 bg-zinc-500/10 hover:bg-zinc-500/20 rounded-lg transition-colors">\n                         ${backButtonSVG}\n                      </button>\n                      <Cloud className="w-6 h-6 text-accent-500" /> Dokumentet Online`
+);
 
-code = code.replace(searchRegex, replacement);
+code = code.replace(
+  /Menaxho Llogarinë Google Cloud/g,
+  `<button onClick={() => setAuthModal(false)} className="mr-2 p-1.5 bg-zinc-500/10 hover:bg-zinc-500/20 rounded-lg transition-colors">\n                         ${backButtonSVG}\n                      </button>\n                      Menaxho Llogarinë Google Cloud`
+);
 
-fs.writeFileSync('src/components/Notepad.tsx', code, 'utf8');
+code = code.replace(
+  /Backup i Fshehtë dhe Rikthim Manual/g,
+  `<button onClick={() => setBackupModal(false)} className="mr-2 p-1.5 bg-zinc-500/10 hover:bg-zinc-500/20 rounded-lg transition-colors">\n                         ${backButtonSVG}\n                      </button>\n                      Backup i Fshehtë dhe Rikthim Manual`
+);
+
+code = code.replace(
+  /Cilësimet \(Settings\)/g,
+  `<button onClick={() => setSettingsModal(false)} className="mr-2 p-1.5 bg-zinc-500/10 hover:bg-zinc-500/20 rounded-lg transition-colors">\n                         ${backButtonSVG}\n                      </button>\n                      Cilësimet (Settings)`
+);
+
+code = code.replace(
+  /{passwordModal.type === 'setup' \? 'Krijo Password Sigurie' : 'Futni Password'}/g,
+  `{passwordModal.type === 'setup' ? 'Krijo Password Sigurie' : 'Futni Password'}`
+); // Leave password modal alone since it might interrupt flow or logic if aborted manually, wait, it has an Anulo button already.
+
+fs.writeFileSync('src/components/Notepad.tsx', code);
