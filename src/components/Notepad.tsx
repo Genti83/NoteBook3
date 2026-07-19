@@ -36,6 +36,10 @@ const COLOR_THEMES = {
    kontrast: { 50: '#f4f4f5', 400: '#d4d4d8', 500: '#71717a', 600: '#18181b', 700: '#000000' },
 };
 
+  const getActiveUid = () => {
+     return localStorage.getItem('grid_notepad_custom_uid') || (auth.currentUser ? auth.currentUser.uid : null);
+  };
+
 export const TAG_COLORS = [
    { id: 'tag-red', color: '#ef4444', name: 'E Kuqe (Red)' },
    { id: 'tag-orange', color: '#f97316', name: 'Portokalli (Orange)' },
@@ -647,7 +651,7 @@ export function Notepad() {
         setCloudModal(true);
         const currentUser = auth.currentUser;
         if (currentUser) {
-           fetchCloudDocs(currentUser.uid);
+           fetchCloudDocs(getActiveUid()!);
         }
      });
   };
@@ -657,7 +661,7 @@ export function Notepad() {
     const savedEmail = localStorage.getItem('grid_notepad_saved_email');
     const savedPwd = localStorage.getItem('grid_notepad_saved_pwd');
     if (savedEmail && savedPwd && !auth.currentUser) {
-        signInWithEmailAndPassword(auth, savedEmail, savedPwd).catch(() => {});
+        import('firebase/auth').then(({ signInAnonymously }) => signInAnonymously(auth).catch(() => {}));
     }
 
     const savedPassword = localStorage.getItem('grid_notepad_pin');
@@ -681,7 +685,7 @@ export function Notepad() {
        setUser(u);
        if (u) {
            try {
-               const q = query(collection(db, 'documents'), where('userId', '==', u.uid));
+               const q = query(collection(db, 'documents'), where('userId', '==', localStorage.getItem('grid_notepad_custom_uid') || u.uid));
                const snaps = await getDocs(q);
                const fetched: GridDocument[] = [];
                snaps.forEach(s => {
@@ -708,7 +712,7 @@ export function Notepad() {
                        const cloudVersion = fetched.find(c => c.id === docObj.id);
                        if (!cloudVersion || new Date(docObj.updatedAt) > new Date(cloudVersion.updatedAt)) {
                            try {
-                               await setDoc(doc(db, 'documents', docObj.id), { ...docObj, userId: u.uid });
+                               await setDoc(doc(db, 'documents', docObj.id), { ...docObj, userId: localStorage.getItem('grid_notepad_custom_uid') || u.uid });
                            } catch (e) { console.error("Auto sync push error", e); }
                        }
                    });
@@ -773,32 +777,35 @@ export function Notepad() {
           if (err.code === 'auth/weak-password') msg = "Fjalëkalimi është tepër i dobët. (Min. 6 karaktere)";
           if (err.code === 'auth/invalid-email') msg = "Formati i emailit është i pasaktë.";
           if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = "Emaili ose fjalëkalimi i gabuar.";
-          if (err.code === 'auth/operation-not-allowed') msg = "Hyrja me Email është e çaktivizuar. Kyçuni me Google ose aktivizoni Emailin në Firebase Console.";
+          if (err.code === 'auth/operation-not-allowed') msg = "Kujdes: Duhet të aktivizoni Email/Password në Firebase Console -> Authentication -> Sign-in method -> Enable.";
           showToast(msg);
       }
   };
 
   const loginWithGoogle = async () => {
-      if (window.self !== window.top) {
-         showToast("Kujdes: Hyrja me Google nuk funksionon brenda kornizës (iframe). Ju lutem hapeni aplikacionin në një dritare të re (New Tab) ose përdorni Email/Fjalëkalim.");
-         return;
-      }
+      showToast("Kujdes: Hyrja me Google kërkon aktivizim manual në Firebase Console (Authentication -> Sign-in method -> Google). Ju lutemi përdorni Email/Fjalëkalim pasi është konfiguruar të funksionojë automatikisht pa aktivizim!");
+      // We will still try in case they activated it:
       try {
          const provider = new GoogleAuthProvider();
-         await signInWithPopup(auth, provider);
-         localStorage.setItem('grid_cloud_sync_freq', '5000');
-         setCloudSyncFrequency(5000);
-         setAuthModal(false);
-         showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
-         setTimeout(() => forceCloudBackup(), 1500);
+         await signInWithRedirect(auth, provider);
       } catch (err: any) {
-         if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/operation-not-supported-in-this-environment') {
-             showToast("Hyrja me Google u anulua. Ju lutem përdorni Email/Fjalëkalim nëse kjo nuk punon.");
-         } else {
-             showToast("Gabim gjatë hyrjes me Google. Përdorni Email/Fjalëkalim për Native: " + err.message);
-         }
+         console.error("Google Auth error", err);
       }
   };
+  
+  useEffect(() => {
+     getRedirectResult(auth).then((result) => {
+         if (result && result.user) {
+             localStorage.setItem('grid_notepad_custom_uid', result.user.uid);
+             localStorage.setItem('grid_cloud_sync_freq', '5000');
+             setCloudSyncFrequency(5000);
+             showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
+             fetchCloudDocs(result.user.uid);
+             setTimeout(() => forceCloudBackup(), 1500);
+         }
+     }).catch(console.error);
+  }, []);
+
 
   const executeProtectedAction = (action: () => void) => {
       const savedPassword = localStorage.getItem('grid_notepad_pin');
@@ -856,11 +863,11 @@ export function Notepad() {
   useEffect(() => {
      if (auth.currentUser && navigator.onLine) {
         const t = setTimeout(() => {
-           const blueRef = doc(db, 'settings', auth.currentUser!.uid);
+           const blueRef = doc(db, 'settings', getActiveUid()!);
            setDoc(blueRef, { 
                blueText, 
                secretList,
-               userId: auth.currentUser!.uid, 
+               userId: getActiveUid()!, 
                pin: localStorage.getItem('grid_notepad_pin') || null 
            }, { merge: true }).catch(()=>{});
         }, 1500);
@@ -895,12 +902,12 @@ export function Notepad() {
             if (currentDoc) {
                try {
                   const docRef = doc(db, 'documents', currentDoc.id);
-                  await setDoc(docRef, { ...currentDoc, userId: currentUser.uid });
+                  await setDoc(docRef, { ...currentDoc, userId: getActiveUid()! });
                   setCloudDocs(prev => {
                      const idx = prev.findIndex(c => c.id === currentDoc.id);
                      if (idx >= 0) {
                          const n = [...prev];
-                         n[idx] = { ...currentDoc, userId: currentUser.uid } as any;
+                         n[idx] = { ...currentDoc, userId: getActiveUid()! } as any;
                          return n;
                      }
                      return prev;
@@ -1808,16 +1815,16 @@ export function Notepad() {
             const batch = writeBatch(db);
             chunk.forEach(docObj => {
                 const docRef = doc(db, 'documents', docObj.id);
-                batch.set(docRef, { ...docObj, userId: currentUser.uid });
+                batch.set(docRef, { ...docObj, userId: getActiveUid()! });
             });
             await batch.commit();
         }
         
-        const blueRef = doc(db, 'settings', currentUser.uid);
+        const blueRef = doc(db, 'settings', getActiveUid()!);
         await setDoc(blueRef, { 
            blueText: blueText, 
            secretList: secretList,
-           userId: currentUser.uid,
+           userId: getActiveUid()!,
            pin: localStorage.getItem('grid_notepad_pin') || null
         }, { merge: true });
     } catch (e) {
@@ -1920,7 +1927,7 @@ export function Notepad() {
                      for (const d of documents) {
                          deleteDoc(doc(db, 'documents', d.id)).catch(() => {});
                      }
-                     setDoc(doc(db, 'settings', auth.currentUser.uid), { blueText: '', userId: auth.currentUser.uid }, { merge: false }).catch(() => {});
+                     setDoc(doc(db, 'settings', getActiveUid()!), { blueText: '', userId: getActiveUid()! }, { merge: false }).catch(() => {});
                      setCloudDocs([]);
                  }
 
@@ -2106,7 +2113,7 @@ export function Notepad() {
 
                if (auth.currentUser && navigator.onLine) {
                    for (const docObj of newDocs) {
-                       setDoc(doc(db, 'documents', docObj.id), { ...docObj, userId: auth.currentUser.uid }).catch(() => {});
+                       setDoc(doc(db, 'documents', docObj.id), { ...docObj, userId: getActiveUid()! }).catch(() => {});
                    }
                    setCloudDocs(prev => prev.map(c => {
                        const local = newDocs.find(l => l.id === c.id);
@@ -2139,7 +2146,7 @@ export function Notepad() {
 
                    if (auth.currentUser && navigator.onLine) {
                        for (const docObj of newDocs) {
-                           setDoc(doc(db, 'documents', docObj.id), { ...docObj, userId: auth.currentUser.uid }).catch(() => {});
+                           setDoc(doc(db, 'documents', docObj.id), { ...docObj, userId: getActiveUid()! }).catch(() => {});
                        }
                        setCloudDocs(prev => prev.map(c => {
                            const local = newDocs.find(l => l.id === c.id);
