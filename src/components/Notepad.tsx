@@ -661,7 +661,7 @@ export function Notepad() {
     const savedEmail = localStorage.getItem('grid_notepad_saved_email');
     const savedPwd = localStorage.getItem('grid_notepad_saved_pwd');
     if (savedEmail && savedPwd && !auth.currentUser) {
-        import('firebase/auth').then(({ signInAnonymously }) => signInAnonymously(auth).catch(() => {}));
+        signInWithEmailAndPassword(auth, savedEmail, savedPwd).catch(() => {});
     }
 
     const savedPassword = localStorage.getItem('grid_notepad_pin');
@@ -754,50 +754,57 @@ export function Notepad() {
   const handleEmailAuth = async (e: React.FormEvent) => {
       e.preventDefault();
       try {
-          // Përdorim Anonymouse Login si transport për të kaluar rregullat e Firebase (që kërkojnë request.auth != null)
-          // por përdorim një hash unik nga Emaili + Fjalëkalimi juaj për të identifikuar të dhënat kudo (Web/APK).
-          const { signInAnonymously } = await import('firebase/auth');
-          await signInAnonymously(auth);
+          if (isSignUp) {
+              await createUserWithEmailAndPassword(auth, email, password);
+              showToast("Llogaria u krijua me sukses! Sinkronizimi Cloud u aktivizua.");
+          } else {
+              await signInWithEmailAndPassword(auth, email, password);
+              showToast("Hyrje e suksesshme! Sinkronizimi Cloud u aktivizua.");
+          }
           
-          const encoder = new TextEncoder();
-          const data = encoder.encode(email.toLowerCase().trim() + "::" + password);
-          const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-          const hashArray = Array.from(new Uint8Array(hashBuffer));
-          const customUid = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-          
-          localStorage.setItem('grid_notepad_custom_uid', customUid);
           localStorage.setItem('grid_notepad_saved_email', email);
           localStorage.setItem('grid_notepad_saved_pwd', password);
+          localStorage.removeItem('grid_notepad_custom_uid'); // We will use Firebase standard UID
           
           localStorage.setItem('grid_cloud_sync_freq', '5000');
           setCloudSyncFrequency(5000);
           
-          showToast(isSignUp ? "Llogaria u krijua dhe u lidh me Cloud automatikisht!" : "Hyrje e suksesshme! Sinkronizimi aktiv.");
           setAuthModal(false);
           setPassword('');
           
-          fetchCloudDocs(customUid);
           setTimeout(() => forceCloudBackup(), 1500);
       } catch (err: any) {
-          console.error("Auth error", err);
-          showToast("Gabim gjatë lidhjes me Cloud: " + err.message);
+          let msg = "Gabim: " + err.message;
+          if (err.code === 'auth/email-already-in-use') {
+             setIsSignUp(false);
+             showToast("Llogaria ekziston. Po kalojmë tek Hyrja. Klikoni Hyr përsëri.");
+             return;
+          }
+          if (err.code === 'auth/weak-password') msg = "Fjalëkalimi duhet të ketë të paktën 6 karaktere.";
+          if (err.code === 'auth/invalid-email') msg = "Formati i emailit është i pasaktë.";
+          if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = "Emaili ose fjalëkalimi i gabuar.";
+          if (err.code === 'auth/operation-not-allowed') msg = "Kujdes: Email/Password nuk është aktivizuar në Firebase Console.";
+          showToast(msg);
       }
   };
 
   const loginWithGoogle = async () => {
-      if (Capacitor.isNativePlatform()) {
-         showToast("Kujdes: Hyrja me Google në APK kërkon konfigurim nativ (mbetet në Web Browser). Ju lutem përdorni Email / Fjalëkalim për të qëndruar brenda aplikacionit APK!");
-         return;
-      }
       try {
          const provider = new GoogleAuthProvider();
          if (!auth) throw new Error("Auth is not initialized");
-         await signInWithPopup(auth, provider);
-         localStorage.setItem('grid_cloud_sync_freq', '5000');
-         setCloudSyncFrequency(5000);
-         setAuthModal(false);
-         showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
-         setTimeout(() => forceCloudBackup(), 1500);
+         
+         if (Capacitor.isNativePlatform()) {
+             showToast("Kujdes: Hyrja me Google në APK kërkon konfigurim nativ. Po përpiqemi me Redirect...");
+             await signInWithRedirect(auth, provider);
+         } else {
+             await signInWithPopup(auth, provider);
+             localStorage.setItem('grid_cloud_sync_freq', '5000');
+             setCloudSyncFrequency(5000);
+             localStorage.removeItem('grid_notepad_custom_uid'); // Clean any pseudo-login
+             setAuthModal(false);
+             showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
+             setTimeout(() => forceCloudBackup(), 1500);
+         }
       } catch (err: any) {
          showToast("Gabim gjatë hyrjes me Google: " + err.message);
       }
@@ -2472,13 +2479,11 @@ export function Notepad() {
                       <span className={`text-sm ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Ose</span>
                       <div className={`flex-1 h-px ${isDark ? "bg-zinc-800" : "bg-zinc-200"}`}></div>
                    </div>
-                   {!Capacitor.isNativePlatform() && (
                    <button type="button" onClick={loginWithGoogle} className={`w-full py-3 flex items-center justify-center gap-2 font-medium rounded-xl transition-colors border ${
                       isDark ? "bg-zinc-950 border-zinc-700 text-zinc-300 hover:bg-zinc-800" : "bg-white border-zinc-300 text-zinc-700 hover:bg-zinc-50"
                    }`}>
                       Google
                    </button>
-                   )}
                    <p className="text-center text-xs mt-3 text-zinc-500 font-medium bg-zinc-500/10 p-3 rounded-lg">
                       {isSignUp ? 'Tashmë i keni dhënë informacionet dhe keni një llogari aktive në Firebase? ' : 'Për të pasur akses në sistemin Cloud (Firebase) fillimisht duhet të regjistroheni për të aktivizuar hapësirën tuaj personale. '}
                       <button type="button" onClick={() => setIsSignUp(!isSignUp)} className="text-accent-500 font-bold hover:underline ml-1">
