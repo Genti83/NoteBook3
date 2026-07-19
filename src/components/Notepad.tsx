@@ -779,10 +779,12 @@ export function Notepad() {
   };
 
   const loginWithGoogle = async () => {
+      if (window.self !== window.top) {
+         showToast("Kujdes: Hyrja me Google nuk funksionon brenda kornizës (iframe). Ju lutem hapeni aplikacionin në një dritare të re (New Tab) ose përdorni Email/Fjalëkalim.");
+         return;
+      }
       try {
          const provider = new GoogleAuthProvider();
-         // signInWithPopup usually works better than redirect to avoid getting stuck in Chrome.
-         // If blocked in Native, we catch the error.
          await signInWithPopup(auth, provider);
          localStorage.setItem('grid_cloud_sync_freq', '5000');
          setCloudSyncFrequency(5000);
