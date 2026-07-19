@@ -758,53 +758,53 @@ export function Notepad() {
               await createUserWithEmailAndPassword(auth, email, password);
               localStorage.setItem('grid_cloud_sync_freq', '5000');
               setCloudSyncFrequency(5000);
-              showToast("Llogaria u krijua! Sinkronizimi Cloud (5s Auto-Save) u aktivizua automatikisht!");
+              showToast("Llogaria u krijua me sukses! Sinkronizimi Cloud u aktivizua.");
           } else {
               await signInWithEmailAndPassword(auth, email, password);
               localStorage.setItem('grid_cloud_sync_freq', '5000');
               setCloudSyncFrequency(5000);
-              showToast("Hyrje e suksesshme! Sinkronizimi Cloud (5s Auto-Save) u aktivizua!");
+              showToast("Hyrje e suksesshme! Sinkronizimi Cloud u aktivizua.");
           }
           localStorage.setItem('grid_notepad_saved_email', email);
           localStorage.setItem('grid_notepad_saved_pwd', password);
           setAuthModal(false);
           setPassword('');
-          // setCloudModal(true);
           setTimeout(() => forceCloudBackup(), 1500);
       } catch (err: any) {
-          let msg = "Gabim gjatë procesit: " + err.message;
-          if (err.code === 'auth/email-already-in-use') msg = "Kjo adresë emaili është tashmë në përdorim.";
-          if (err.code === 'auth/weak-password') msg = "Fjalëkalimi është tepër i dobët. (Min. 6 karaktere)";
+          let msg = "Gabim: " + err.message;
+          if (err.code === 'auth/email-already-in-use') {
+             setIsSignUp(false);
+             showToast("Llogaria ekziston. Po kalojmë tek Hyrja. Klikoni Hyr përsëri.");
+             return;
+          }
+          if (err.code === 'auth/weak-password') msg = "Fjalëkalimi duhet të ketë të paktën 6 karaktere.";
           if (err.code === 'auth/invalid-email') msg = "Formati i emailit është i pasaktë.";
           if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = "Emaili ose fjalëkalimi i gabuar.";
-          if (err.code === 'auth/operation-not-allowed') msg = "Kujdes: Duhet të aktivizoni Email/Password në Firebase Console -> Authentication -> Sign-in method -> Enable.";
+          if (err.code === 'auth/operation-not-allowed') msg = "Kujdes: Email/Password nuk është aktivizuar në Firebase Console.";
           showToast(msg);
       }
   };
 
   const loginWithGoogle = async () => {
-      showToast("Kujdes: Hyrja me Google kërkon aktivizim manual në Firebase Console (Authentication -> Sign-in method -> Google). Ju lutemi përdorni Email/Fjalëkalim pasi është konfiguruar të funksionojë automatikisht pa aktivizim!");
-      // We will still try in case they activated it:
+      if (Capacitor.isNativePlatform()) {
+         showToast("Kujdes: Hyrja me Google në APK kërkon konfigurim nativ (mbetet në Web Browser). Ju lutem përdorni Email / Fjalëkalim për të qëndruar brenda aplikacionit APK!");
+         return;
+      }
       try {
          const provider = new GoogleAuthProvider();
-         await signInWithRedirect(auth, provider);
+         if (!auth) throw new Error("Auth is not initialized");
+         await signInWithPopup(auth, provider);
+         localStorage.setItem('grid_cloud_sync_freq', '5000');
+         setCloudSyncFrequency(5000);
+         setAuthModal(false);
+         showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
+         setTimeout(() => forceCloudBackup(), 1500);
       } catch (err: any) {
-         console.error("Google Auth error", err);
+         showToast("Gabim gjatë hyrjes me Google: " + err.message);
       }
   };
   
-  useEffect(() => {
-     getRedirectResult(auth).then((result) => {
-         if (result && result.user) {
-             localStorage.setItem('grid_notepad_custom_uid', result.user.uid);
-             localStorage.setItem('grid_cloud_sync_freq', '5000');
-             setCloudSyncFrequency(5000);
-             showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
-             fetchCloudDocs(result.user.uid);
-             setTimeout(() => forceCloudBackup(), 1500);
-         }
-     }).catch(console.error);
-  }, []);
+
 
 
   const executeProtectedAction = (action: () => void) => {
@@ -2204,7 +2204,7 @@ export function Notepad() {
       {/* CONFIRMATION MODAL - DELETE DOC */}
       {docToDelete && (
          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
-            <div className={`max-w-md w-full p-6 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
+            <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <h3 className={`text-xl font-bold mb-3 text-red-500`}>{t('Kujdes!', 'Warning!')}</h3>
                <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
                   {t('Jeni i sigurt që doni ta fshini listën: ', 'Are you sure you want to delete the list: ')}
@@ -2244,7 +2244,7 @@ export function Notepad() {
       {/* CONFIRMATION MODAL - DELETE CLOUD DOC */}
       {cloudDocToDelete && (
          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
-            <div className={`max-w-md w-full p-6 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
+            <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <h3 className={`text-xl font-bold mb-3 text-red-500`}>{t('Kujdes!', 'Warning!')}</h3>
                <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
                   {t('Jeni i sigurt që doni ta fshini listën përgjithmonë nga Cloud: ', 'Are you sure you want to permanently delete from Cloud: ')}
@@ -2432,8 +2432,8 @@ export function Notepad() {
 
       {/* AUTH MODAL */}
       {authModal && (
-          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
-             <div className={`max-w-md w-full p-6 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
+          <div className="fixed inset-0 z-[90] flex items-start pt-20 md:pt-0 md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
+             <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                 <div className="flex justify-between items-center mb-6">
                    <h3 className={`text-xl font-bold ${textColor}`}>
                       {isSignUp ? 'Krijo Llogari' : 'Hyr në Llogari'}
@@ -2596,7 +2596,7 @@ export function Notepad() {
 
       {/* BACKUP MODAL */}
       {backupModal && (
-          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+          <div className="fixed inset-0 z-[90] flex items-start pt-20 md:pt-0 md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
              <div className={`max-w-xl w-full max-h-[90vh] flex flex-col rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                 <div className={`flex justify-between items-center p-5 border-b ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
                    <h3 className={`text-xl font-bold flex items-center gap-2 ${textColor}`}>
@@ -2664,7 +2664,7 @@ export function Notepad() {
 
       {/* CLOUD MODAL */}
       {cloudModal && (
-          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+          <div className="fixed inset-0 z-[90] flex items-start pt-20 md:pt-0 md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
              <div className={`max-w-2xl w-full max-h-[85vh] flex flex-col rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                 <div className={`flex justify-between items-center p-5 border-b ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
                    <h3 className={`text-xl font-bold flex items-center gap-2 ${textColor}`}>
@@ -3817,7 +3817,7 @@ export function Notepad() {
       {/* CONFIRMATION MODAL - CLOSE */}
       {showConfirmClose && (
          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
-            <div className={`max-w-md w-full p-6 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
+            <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <h3 className={`text-xl font-bold mb-3 ${textColor}`}>{t('Kthehu në Katalog', 'Return to Catalog')}</h3>
                <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{t('A i keni ruajtur ndryshimet tuaja? Nëse dilni pa ruajtur, ndryshimet e fundit nuk do të ruhen.', 'Have you saved your changes? If you exit without saving, recent changes will not be saved.')}</p>
                <div className="flex justify-end gap-3">
@@ -3834,7 +3834,7 @@ export function Notepad() {
 
       {showConfirmDeleteSelected && (
          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
-            <div className={`max-w-md w-full p-6 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
+            <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <h3 className={`text-xl font-bold mb-3 text-red-500`}>Kujdes!</h3>
                <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>Jeni i sigurt që doni të boshatisni {selectedRows.size} rrjeshtat e zgjedhur? Ky veprim nuk mund të kthehet mbrapsht.</p>
                <div className="flex justify-end gap-3">
@@ -3852,7 +3852,7 @@ export function Notepad() {
       {/* CONFIRMATION MODAL - CLEAR */}
       {showConfirmClear && (
          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
-            <div className={`max-w-md w-full p-6 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
+            <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <h3 className={`text-xl font-bold mb-3 text-red-500`}>Kujdes!</h3>
                <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>Jeni i sigurt që doni të boshatisni të 90 rrjeshtat? Ky veprim nuk mund të kthehet mbrapsht.</p>
                <div className="flex justify-end gap-3">
