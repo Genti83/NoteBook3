@@ -762,6 +762,7 @@ export function Notepad() {
               showToast("Hyrje e suksesshme! Sinkronizimi Cloud (5s Auto-Save) u aktivizua!");
           }
           localStorage.setItem('grid_notepad_saved_email', email);
+          localStorage.setItem('grid_notepad_saved_pwd', password);
           setAuthModal(false);
           setPassword('');
           // setCloudModal(true);
