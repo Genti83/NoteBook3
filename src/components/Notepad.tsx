@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getDirectoryHandle, saveDirectoryHandle } from '../lib/directoryFS';
-import { Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen } from 'lucide-react';
+import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { useFirebase } from '../hooks/useFirebase';
@@ -241,6 +241,7 @@ export function Notepad() {
   
   // Active document state
   const [title, setTitle] = useState(t('Shënim i Paemërtuar', 'Untitled Note'));
+  const [activeTags, setActiveTags] = useState<string[]>([]);
   const [rows, setRows] = useState<GridRow[]>([]);
   const [columnWidths, setColumnWidths] = useState<number[]>([]);
   const [headers, setHeaders] = useState([t('Kolona 1', 'Column 1'), t('Kolona 2', 'Column 2'), t('Kolona 3', 'Column 3'), t('Kolona 4', 'Column 4')]);
@@ -371,6 +372,84 @@ export function Notepad() {
   const [cloudModal, setCloudModal] = useState(false);
   const [cloudDocToDelete, setCloudDocToDelete] = useState<any>(null);
   const [backupModal, setBackupModal] = useState(false);
+  const [gistToken, setGistToken] = useState(localStorage.getItem('grid_notepad_gist_token') || '');
+  const [gistId, setGistId] = useState(localStorage.getItem('grid_notepad_gist_id') || '');
+
+  const saveToGist = async () => {
+      if (!gistToken) return showToast("Ju lutem vendosni një GitHub Token");
+      showToast("Duke ruajtur në GitHub Gist...");
+      try {
+          const content = JSON.stringify(documents);
+          let method = 'POST';
+          let url = 'https://api.github.com/gists';
+          
+          if (gistId) {
+             method = 'PATCH';
+             url = `https://api.github.com/gists/${gistId}`;
+          }
+
+          const res = await fetch(url, {
+             method,
+             headers: {
+                'Authorization': `token ${gistToken}`,
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+             },
+             body: JSON.stringify({
+                description: 'Grid Notepad Backup',
+                public: false,
+                files: {
+                   'grid_notepad_backup.json': { content }
+                }
+             })
+          });
+
+          if (!res.ok) throw new Error("Gabim gjatë ruajtjes në Gist. Kontrolloni Token-in.");
+          const data = await res.json();
+          setGistId(data.id);
+          localStorage.setItem('grid_notepad_gist_id', data.id);
+          localStorage.setItem('grid_notepad_gist_token', gistToken);
+          showToast("U ruajt me sukses në GitHub Gist!");
+      } catch (err: any) {
+          showToast(err.message);
+      }
+  };
+
+  const loadFromGist = async () => {
+      if (!gistToken) return showToast("Ju lutem vendosni një GitHub Token");
+      if (!gistId) return showToast("Nuk ka asnjë Gist ID të ruajtur për t'u rikthyer.");
+      showToast("Duke ngarkuar nga GitHub Gist...");
+      try {
+          const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+             headers: {
+                'Authorization': `token ${gistToken}`,
+                'Accept': 'application/vnd.github.v3+json'
+             }
+          });
+          if (!res.ok) throw new Error("Gabim gjatë ngarkimit. Gist ID ose Token i pavlefshëm.");
+          const data = await res.json();
+          const file = data.files['grid_notepad_backup.json'];
+          if (!file) throw new Error("Skedari nuk u gjet në këtë Gist.");
+          
+          const content = file.truncated ? await (await fetch(file.raw_url)).text() : file.content;
+          const parsed = JSON.parse(content);
+          
+          setDocuments(parsed);
+          localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(parsed));
+          if (activeDocId) {
+             const curr = parsed.find((d: any) => d.id === activeDocId);
+             if (curr) {
+                 setRows(curr.rows);
+                 setHeaders(curr.headers);
+             } else {
+                 createNewDocument();
+             }
+          }
+          showToast("Të dhënat u rikthyen me sukses nga Gist!");
+      } catch (err: any) {
+          showToast(err.message);
+      }
+  };
   const [blueModal, setBlueModal] = useState(false);
   const [blueText, setBlueText] = useState('');
   const [secretList, setSecretList] = useState<{id: string, text: string, done: boolean}[]>([]);
@@ -1072,7 +1151,7 @@ export function Notepad() {
     }));
   };
 
-  const updateActiveDocumentState = (newTitle: string, newRows: GridRow[], newHeaders: string[], newWidths: number[] = columnWidths) => {
+  const updateActiveDocumentState = (newTitle: string, newRows: GridRow[], newHeaders: string[], newWidths: number[] = columnWidths, newTags: string[] = activeTags) => {
      let updatedDocs = [...documents];
      const existingDocIndex = updatedDocs.findIndex(d => d.id === activeDocId);
      
@@ -1083,7 +1162,8 @@ export function Notepad() {
         updatedAt: new Date().toISOString(),
         headers: newHeaders,
         columnWidths: newWidths,
-        rows: newRows
+        rows: newRows,
+        tags: newTags
      };
 
      if (existingDocIndex >= 0) {
@@ -1108,6 +1188,7 @@ export function Notepad() {
   const openDocument = (doc: GridDocument) => {
     setActiveDocId(doc.id);
     setTitle(doc.title);
+    setActiveTags(doc.tags || []);
     setActiveTags(doc.tags || []);
     
     const newRows = [...doc.rows];
@@ -2505,17 +2586,11 @@ export function Notepad() {
                       <span className={`text-sm ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Ose</span>
                       <div className={`flex-1 h-px ${isDark ? "bg-zinc-800" : "bg-zinc-200"}`}></div>
                    </div>
-                   {!Capacitor.isNativePlatform() ? (
-                     <button type="button" onClick={loginWithGoogle} className={`w-full py-3 flex items-center justify-center gap-2 font-medium rounded-xl transition-colors border ${
-                        isDark ? "bg-zinc-950 border-zinc-700 text-zinc-300 hover:bg-zinc-800" : "bg-white border-zinc-300 text-zinc-700 hover:bg-zinc-50"
-                     }`}>
-                        Google
-                     </button>
-                   ) : (
-                     <div className="text-center text-xs text-orange-500 font-medium p-2 bg-orange-500/10 rounded-lg">
-                        ⚠️ Për siguri dhe funksionim të plotë në Aplikacion, ju lutemi përdorni llogari me Email. Hyrja me Google ofrohet vetëm në web.
-                     </div>
-                   )}
+                   <button type="button" onClick={loginWithGoogle} className={`w-full py-3 flex items-center justify-center gap-2 font-medium rounded-xl transition-colors border ${
+                      isDark ? "bg-zinc-950 border-zinc-700 text-zinc-300 hover:bg-zinc-800" : "bg-white border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+                   }`}>
+                      Google
+                   </button>
                    <p className="text-center text-xs mt-3 text-zinc-500 font-medium bg-zinc-500/10 p-3 rounded-lg">
                       {isSignUp ? 'Tashmë i keni dhënë informacionet dhe keni një llogari aktive në Firebase? ' : 'Për të pasur akses në sistemin Cloud (Firebase) fillimisht duhet të regjistroheni për të aktivizuar hapësirën tuaj personale. '}
                       <button type="button" onClick={() => setIsSignUp(!isSignUp)} className="text-accent-500 font-bold hover:underline ml-1">
@@ -2719,6 +2794,42 @@ export function Notepad() {
                             <LogIn className="w-4 h-4" /> {t('Kyçuni për Cloud', 'Login for Cloud')}
                          </button>
                       )}
+                   </div>
+
+                   {/* GitHub Gist Backup */}
+                   <div className={`p-4 rounded-xl border ${isDark ? "bg-zinc-800/50 border-zinc-700" : "bg-zinc-50 border-zinc-200"}`}>
+                      <h4 className={`font-bold mb-2 flex items-center gap-2 ${textColor}`}>
+                         <Github className="w-5 h-5 text-zinc-900 dark:text-white" /> GitHub Gist Sync
+                      </h4>
+                      <p className={`text-sm mb-4 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                        Ruani të dhënat tuaja drejtpërdrejt në llogarinë tuaj GitHub përmes Private Gist. <a href="https://github.com/settings/tokens/new?scopes=gist&description=Notepad+Backup" target="_blank" rel="noopener noreferrer" className="text-accent-500 underline">Krijo një Token këtu (Zgjidh opsionin 'gist')</a>.
+                      </p>
+                      
+                      <div className="flex flex-col gap-3 mb-4">
+                         <input 
+                            type="password" 
+                            placeholder="GitHub Personal Access Token" 
+                            value={gistToken}
+                            onChange={(e) => { setGistToken(e.target.value); localStorage.setItem('grid_notepad_gist_token', e.target.value); }}
+                            className={`w-full px-3 py-2 text-sm rounded-lg border focus:outline-none focus:border-accent-500 ${isDark ? "bg-zinc-900 border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900"}`}
+                         />
+                         <input 
+                            type="text" 
+                            placeholder="Gist ID (Bosh për të krijuar të re)" 
+                            value={gistId}
+                            onChange={(e) => { setGistId(e.target.value); localStorage.setItem('grid_notepad_gist_id', e.target.value); }}
+                            className={`w-full px-3 py-2 text-sm rounded-lg border focus:outline-none focus:border-accent-500 ${isDark ? "bg-zinc-900 border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900"}`}
+                         />
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-3">
+                         <button onClick={saveToGist} className={`flex-1 flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors border ${isDark ? "bg-zinc-900 hover:bg-zinc-800 border-zinc-700 text-white" : "bg-zinc-900 hover:bg-zinc-800 text-white shadow-md border-transparent"}`}>
+                            <Upload className="w-4 h-4" /> Ruaj në Gist
+                         </button>
+                         <button onClick={loadFromGist} className={`flex-1 flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors border ${isDark ? "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-300" : "bg-white hover:bg-zinc-100 border-zinc-300 text-zinc-700"}`}>
+                            <Download className="w-4 h-4" /> Ngarko nga Gist
+                         </button>
+                      </div>
                    </div>
                 </div>
              </div>
