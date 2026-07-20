@@ -26,6 +26,7 @@ type GridDocument = {
   headers: string[];
   columnWidths?: number[];
   rows: GridRow[];
+  tags?: string[];
 };
 
 const COLOR_THEMES = {
@@ -341,6 +342,9 @@ export function Notepad() {
   const [showConfirmClear, setShowConfirmClear] = useState(false);
   
   const [catalogSearch, setCatalogSearch] = useState('');
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  
+  const allAvailableTags = Array.from(new Set(documents.flatMap(doc => doc.tags || []))).sort();
   const [docSearch, setDocSearch] = useState('');
   const [docToDelete, setDocToDelete] = useState<string | null>(null);
   
@@ -1082,6 +1086,7 @@ export function Notepad() {
   const createNewDocument = () => {
     setActiveDocId(`doc-${Date.now()}`);
     setTitle(t('Shënim i Paemërtuar', 'Untitled Note'));
+    setActiveTags([]);
     setRows(getEmptyRows());
     setHeaders([t('Kolona 1', 'Column 1'), t('Kolona 2', 'Column 2'), t('Kolona 3', 'Column 3'), t('Kolona 4', 'Column 4')]);
     setSelectedRows(new Set());
@@ -1090,6 +1095,7 @@ export function Notepad() {
   const openDocument = (doc: GridDocument) => {
     setActiveDocId(doc.id);
     setTitle(doc.title);
+    setActiveTags(doc.tags || []);
     
     const newRows = [...doc.rows];
     const hasContent = (r: GridRow) => (doc.headers.some((_, i) => (r[`col${i+1}`] || '').toString().trim()) || r.image) ? true : false;
@@ -2191,6 +2197,7 @@ export function Notepad() {
   };
 
   const filteredDocs = documents.filter(doc => {
+     if (selectedTag && !(doc.tags || []).includes(selectedTag)) return false;
      if (!catalogSearch.trim()) return true;
      const q = catalogSearch.toLowerCase();
      if (doc.title.toLowerCase().includes(q)) return true;
@@ -2485,11 +2492,17 @@ export function Notepad() {
                       <span className={`text-sm ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Ose</span>
                       <div className={`flex-1 h-px ${isDark ? "bg-zinc-800" : "bg-zinc-200"}`}></div>
                    </div>
-                   <button type="button" onClick={loginWithGoogle} className={`w-full py-3 flex items-center justify-center gap-2 font-medium rounded-xl transition-colors border ${
-                      isDark ? "bg-zinc-950 border-zinc-700 text-zinc-300 hover:bg-zinc-800" : "bg-white border-zinc-300 text-zinc-700 hover:bg-zinc-50"
-                   }`}>
-                      Google
-                   </button>
+                   {!Capacitor.isNativePlatform() ? (
+                     <button type="button" onClick={loginWithGoogle} className={`w-full py-3 flex items-center justify-center gap-2 font-medium rounded-xl transition-colors border ${
+                        isDark ? "bg-zinc-950 border-zinc-700 text-zinc-300 hover:bg-zinc-800" : "bg-white border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+                     }`}>
+                        Google
+                     </button>
+                   ) : (
+                     <div className="text-center text-xs text-orange-500 font-medium p-2 bg-orange-500/10 rounded-lg">
+                        ⚠️ Për siguri dhe funksionim të plotë në Aplikacion, ju lutemi përdorni llogari me Email. Hyrja me Google ofrohet vetëm në web.
+                     </div>
+                   )}
                    <p className="text-center text-xs mt-3 text-zinc-500 font-medium bg-zinc-500/10 p-3 rounded-lg">
                       {isSignUp ? 'Tashmë i keni dhënë informacionet dhe keni një llogari aktive në Firebase? ' : 'Për të pasur akses në sistemin Cloud (Firebase) fillimisht duhet të regjistroheni për të aktivizuar hapësirën tuaj personale. '}
                       <button type="button" onClick={() => setIsSignUp(!isSignUp)} className="text-accent-500 font-bold hover:underline ml-1">
@@ -3170,6 +3183,33 @@ export function Notepad() {
                   }`}
                />
             </div>
+            {allAvailableTags.length > 0 && (
+               <div className="flex flex-wrap gap-2 mt-3 pb-2 border-b border-zinc-200 dark:border-zinc-800">
+                  <button
+                     onClick={() => setSelectedTag(null)}
+                     className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+                        selectedTag === null
+                           ? "bg-accent-500 text-white"
+                           : isDark ? "bg-zinc-800 text-zinc-400 hover:bg-zinc-700" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
+                     }`}
+                  >
+                     Të gjitha
+                  </button>
+                  {allAvailableTags.map(tag => (
+                     <button
+                        key={tag}
+                        onClick={() => setSelectedTag(tag)}
+                        className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+                           selectedTag === tag
+                              ? "bg-accent-500 text-white"
+                              : isDark ? "bg-zinc-800 text-zinc-400 hover:bg-zinc-700" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
+                        }`}
+                     >
+                        #{tag}
+                     </button>
+                  ))}
+               </div>
+            )}
          </div>
          
          <div className={`p-4 sm:p-5 flex-1 overflow-y-auto w-full max-w-full`}>
@@ -3207,6 +3247,15 @@ export function Notepad() {
                            <span className="flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.createdAt, 'dd MMM yyyy')}</span>
                            <span className="flex items-center gap-0.5"><Save className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.updatedAt, 'HH:mm')}</span>
                         </div>
+                        {(doc.tags && doc.tags.length > 0) && (
+                           <div className="flex flex-wrap gap-1 mt-0.5">
+                              {doc.tags.map(tag => (
+                                 <span key={tag} className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${isDark ? "bg-zinc-800 text-zinc-400" : "bg-zinc-100 text-zinc-500"}`}>
+                                    #{tag}
+                                 </span>
+                              ))}
+                           </div>
+                        )}
                      </div>
                      <button 
                         onClick={(e) => { 
@@ -3251,13 +3300,23 @@ export function Notepad() {
               initialValue={title}
               onChange={(val: string) => {
                   setTitle(val);
-                  updateActiveDocumentState(val, rows, headers);
+                  updateActiveDocumentState(val, rows, headers, columnWidths, activeTags);
               }}
               className={`font-semibold text-sm px-2 py-1 rounded w-full border transition-colors outline-none focus:border-accent-500 ${isDark ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-300 text-zinc-900"}`}
               placeholder={t("Titulli i Shënimit", "Note Title")}
            />
+           <input 
+              value={activeTags.join(', ')}
+              onChange={(e) => {
+                 const newTags = e.target.value.split(',').map(t => t.trim()).filter(t => t !== '');
+                 setActiveTags(newTags);
+                 updateActiveDocumentState(title, rows, headers, columnWidths, newTags);
+              }}
+              className={`text-[10px] px-2 py-0.5 mt-0.5 rounded w-full border transition-colors outline-none focus:border-accent-500 ${isDark ? "bg-zinc-900 border-zinc-800 text-zinc-400" : "bg-white border-zinc-300 text-zinc-500"}`}
+              placeholder={t("Etiketa (p.sh. work, personal)", "Tags (e.g. work, personal)")}
+           />
            {autoSaveMsg && (
-              <span className="text-[10px] text-accent-500 font-medium px-2 py-0.5 animate-in fade-in slide-in-from-top-1 absolute top-[40px] z-50 rounded bg-white dark:bg-zinc-900 shadow-md border dark:border-zinc-800 border-zinc-200">{autoSaveMsg}</span>
+              <span className="text-[10px] text-accent-500 font-medium px-2 py-0.5 animate-in fade-in slide-in-from-top-1 absolute top-[55px] z-50 rounded bg-white dark:bg-zinc-900 shadow-md border dark:border-zinc-800 border-zinc-200">{autoSaveMsg}</span>
            )}
         </div>
         
