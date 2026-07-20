@@ -380,6 +380,19 @@ export function Notepad() {
   const [aiChatModal, setAiChatModal] = useState(false);
   const [aiChatInput, setAiChatInput] = useState(() => localStorage.getItem('grid_aichat_input') || '');
   const [aiChatResponse, setAiChatResponse] = useState('');
+  const [debugLogsModal, setDebugLogsModal] = useState(false);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  
+  useEffect(() => {
+     const updateLogs = () => {
+         try {
+             setDebugLogs(JSON.parse(localStorage.getItem('grid_notepad_debug_logs') || '[]'));
+         } catch(e){}
+     };
+     window.addEventListener('debug-log-updated', updateLogs);
+     updateLogs();
+     return () => window.removeEventListener('debug-log-updated', updateLogs);
+  }, []);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [aiChatImage, setAiChatImage] = useState<string | null>(null);
   const [pendingAiChanges, setPendingAiChanges] = useState<{ documentId: string, newHeaders: string[], newColumnWidths?: number[], newRows: GridRow[] } | null>(null);
@@ -2509,7 +2522,32 @@ export function Notepad() {
                          {isSignUp ? 'Hyr këtu (Login)' : 'Krijo llogari (Register)'}
                       </button>
                    </p>
+                   <button type="button" onClick={() => setDebugLogsModal(true)} className="text-xs text-zinc-500 hover:text-accent-500 mt-4 underline text-center w-full">
+                       Shiko gabimet e lidhjes (Logs)
+                   </button>
                 </form>
+             </div>
+          </div>
+      )}
+      
+      {/* DEBUG LOGS MODAL */}
+      {debugLogsModal && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+             <div className={`max-w-xl w-full p-6 rounded-2xl shadow-2xl border flex flex-col ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`} style={{ maxHeight: '80vh' }}>
+                <div className="flex justify-between items-center mb-4">
+                   <h3 className={`text-lg font-bold ${isDark ? "text-white" : "text-zinc-900"}`}>Sistemi i Log-eve (Problemet e lidhjes)</h3>
+                   <button onClick={() => setDebugLogsModal(false)} className="p-2 bg-transparent text-zinc-500 hover:text-red-500 transition-colors">
+                      <X className="w-5 h-5"/>
+                   </button>
+                </div>
+                <div className={`flex-1 overflow-y-auto p-3 rounded border text-xs font-mono whitespace-pre-wrap ${isDark ? "bg-zinc-950 border-zinc-800 text-green-400" : "bg-zinc-100 border-zinc-300 text-green-700"}`}>
+                    {debugLogs.length === 0 ? "Nuk ka asnjë problem të regjistruar deri tani." : debugLogs.join('\n')}
+                </div>
+                <div className="mt-4 flex justify-end">
+                    <button onClick={() => { localStorage.removeItem('grid_notepad_debug_logs'); setDebugLogs([]); }} className="px-4 py-2 bg-red-600/10 text-red-500 hover:bg-red-600 hover:text-white rounded-lg text-sm font-bold transition-colors">
+                       Pastro
+                    </button>
+                </div>
              </div>
           </div>
       )}
