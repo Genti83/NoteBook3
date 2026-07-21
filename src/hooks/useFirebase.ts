@@ -34,28 +34,31 @@ export function useFirebase() {
   useEffect(() => {
     addDebugLog('useFirebase Init - Platform: ' + Capacitor.getPlatform());
     
-    let unsubscribe: () => void = () => {};
-
-    // Use indexedDBLocalPersistence for Capacitor Android to ensure data persists across app restarts
-    const persistenceType = indexedDBLocalPersistence;
+    let unsubscribe = () => {};
     
-    setPersistence(auth, persistenceType)
+    // Forcojme ruajtjen e sesionit (LOCAL persistence)
+    setPersistence(auth, browserLocalPersistence)
       .then(() => {
-         addDebugLog('Persistence set to indexedDB');
-         // We attach auth state listener AFTER persistence resolves
+         addDebugLog('Persistence set to browserLocal');
          unsubscribe = onAuthStateChanged(auth, (currentUser) => {
            setUser(currentUser);
            setLoading(false);
            addDebugLog('Auth state changed. User: ' + (currentUser ? currentUser.email : 'null'));
          }, (err) => {
            addDebugLog('Auth state error: ' + err.message);
+           setLoading(false);
          });
       })
       .catch((err) => {
          addDebugLog("Persistence setup issue: " + err.message);
-         setLoading(false);
+         // Fallback anyway
+         unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+           setUser(currentUser);
+           setLoading(false);
+         });
       });
 
+    // Handle any redirect results if they came back from a mobile redirect flow
     getRedirectResult(auth).then((result) => {
       if (result && result.user) {
         addDebugLog('Redirect auth success: ' + result.user.email);
@@ -74,9 +77,16 @@ export function useFirebase() {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       
-      const res = await signInWithPopup(auth, provider);
-      addDebugLog('Popup login success: ' + res.user.email);
-      return res.user;
+      // Provon popup, nese deshton (p.sh. bllokohet), provon redirect
+      try {
+          const res = await signInWithPopup(auth, provider);
+          addDebugLog('Popup login success: ' + res.user.email);
+          return res.user;
+      } catch (popupErr: any) {
+          addDebugLog('Popup blocked or failed: ' + popupErr.message + '. Falling back to redirect.');
+          await signInWithRedirect(auth, provider);
+          return null; // redirect will reload page
+      }
     } catch(err: any) {
       addDebugLog('Google Login Exception: ' + err.message);
       throw err;
