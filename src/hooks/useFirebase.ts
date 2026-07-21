@@ -33,19 +33,28 @@ export function useFirebase() {
 
   useEffect(() => {
     addDebugLog('useFirebase Init - Platform: ' + Capacitor.getPlatform());
-    // Explicitly set persistence for robustness
-    const persistenceType = Capacitor.isNativePlatform() ? indexedDBLocalPersistence : browserLocalPersistence;
-    setPersistence(auth, persistenceType)
-      .then(() => addDebugLog('Persistence set to ' + (Capacitor.isNativePlatform() ? 'indexedDB' : 'browserLocal')))
-      .catch((err) => addDebugLog("Persistence setup issue: " + err.message));
+    
+    let unsubscribe: () => void = () => {};
 
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-      addDebugLog('Auth state changed. User: ' + (currentUser ? currentUser.email : 'null'));
-    }, (err) => {
-      addDebugLog('Auth state error: ' + err.message);
-    });
+    // Use indexedDBLocalPersistence for Capacitor Android to ensure data persists across app restarts
+    const persistenceType = indexedDBLocalPersistence;
+    
+    setPersistence(auth, persistenceType)
+      .then(() => {
+         addDebugLog('Persistence set to indexedDB');
+         // We attach auth state listener AFTER persistence resolves
+         unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+           setUser(currentUser);
+           setLoading(false);
+           addDebugLog('Auth state changed. User: ' + (currentUser ? currentUser.email : 'null'));
+         }, (err) => {
+           addDebugLog('Auth state error: ' + err.message);
+         });
+      })
+      .catch((err) => {
+         addDebugLog("Persistence setup issue: " + err.message);
+         setLoading(false);
+      });
 
     getRedirectResult(auth).then((result) => {
       if (result && result.user) {
@@ -61,22 +70,13 @@ export function useFirebase() {
 
   const loginWithGoogle = async () => {
     try {
-      addDebugLog('Starting Google Login');
+      addDebugLog('Starting Google Login (Popup)');
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || Capacitor.isNativePlatform();
-      
-      if (isMobile) {
-         addDebugLog('Mobile detected, using signInWithRedirect');
-         await signInWithRedirect(auth, provider);
-         return null;
-      } else {
-         addDebugLog('Desktop detected, using signInWithPopup');
-         const res = await signInWithPopup(auth, provider);
-         addDebugLog('Popup login success: ' + res.user.email);
-         return res.user;
-      }
+      const res = await signInWithPopup(auth, provider);
+      addDebugLog('Popup login success: ' + res.user.email);
+      return res.user;
     } catch(err: any) {
       addDebugLog('Google Login Exception: ' + err.message);
       throw err;

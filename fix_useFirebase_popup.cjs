@@ -3,13 +3,22 @@ let code = fs.readFileSync('src/hooks/useFirebase.ts', 'utf8');
 
 const targetGoogleLogin = `  const loginWithGoogle = async () => {
     try {
-      addDebugLog('Starting Google Login (Redirect Mode)');
+      addDebugLog('Starting Google Login');
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       
-      // Duke përdorur gjithmonë signInWithRedirect siç u kërkua për të shmangur popup bllokimet dhe popup-closed-by-user
-      await signInWithRedirect(auth, provider);
-      return null;
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || Capacitor.isNativePlatform();
+      
+      if (isMobile) {
+         addDebugLog('Mobile detected, using signInWithRedirect');
+         await signInWithRedirect(auth, provider);
+         return null;
+      } else {
+         addDebugLog('Desktop detected, using signInWithPopup');
+         const res = await signInWithPopup(auth, provider);
+         addDebugLog('Popup login success: ' + res.user.email);
+         return res.user;
+      }
     } catch(err: any) {
       addDebugLog('Google Login Exception: ' + err.message);
       throw err;
