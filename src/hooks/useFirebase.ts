@@ -61,13 +61,13 @@ export function useFirebase() {
 
   const loginWithGoogle = async () => {
     try {
-      addDebugLog('Starting Google Login (Redirect Mode)');
+      addDebugLog('Starting Google Login (Popup)');
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       
-      // Duke përdorur gjithmonë signInWithRedirect siç u kërkua për të shmangur popup bllokimet dhe popup-closed-by-user
-      await signInWithRedirect(auth, provider);
-      return null;
+      const res = await signInWithPopup(auth, provider);
+      addDebugLog('Popup login success: ' + res.user.email);
+      return res.user;
     } catch(err: any) {
       addDebugLog('Google Login Exception: ' + err.message);
       throw err;
