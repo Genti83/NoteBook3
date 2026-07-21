@@ -374,6 +374,8 @@ export function Notepad() {
   const [backupModal, setBackupModal] = useState(false);
   const [gistToken, setGistToken] = useState(localStorage.getItem('grid_notepad_gist_token') || '');
   const [gistId, setGistId] = useState(localStorage.getItem('grid_notepad_gist_id') || '');
+  const [gistViewerModal, setGistViewerModal] = useState(false);
+  const [gistViewerContent, setGistViewerContent] = useState<string | null>(null);
 
   const saveToGist = async () => {
       if (!gistToken) return showToast("Ju lutem vendosni një GitHub Token");
@@ -410,6 +412,29 @@ export function Notepad() {
           localStorage.setItem('grid_notepad_gist_id', data.id);
           localStorage.setItem('grid_notepad_gist_token', gistToken);
           showToast("U ruajt me sukses në GitHub Gist!");
+      } catch (err: any) {
+          showToast(err.message);
+      }
+  };
+
+  const viewGistContent = async () => {
+      if (!gistId) return showToast("Nuk ka Gist ID. Ruani një herë dokumentet fillimisht.");
+      showToast("Duke hapur dokumentin Gist...");
+      try {
+          const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+             headers: gistToken ? {
+                'Authorization': `token ${gistToken}`,
+                'Accept': 'application/vnd.github.v3+json'
+             } : undefined
+          });
+          if (!res.ok) throw new Error("Gabim gjatë ngarkimit. Gist ID i pavlefshëm.");
+          const data = await res.json();
+          const file = data.files['grid_notepad_backup.json'];
+          if (!file) throw new Error("Skedari nuk u gjet në këtë Gist.");
+          
+          const content = file.truncated ? await (await fetch(file.raw_url)).text() : file.content;
+          setGistViewerContent(content);
+          setGistViewerModal(true);
       } catch (err: any) {
           showToast(err.message);
       }
@@ -2322,7 +2347,7 @@ export function Notepad() {
     <>
       {/* CONFIRMATION MODAL - DELETE DOC */}
       {docToDelete && (
-         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+         <div className="fixed inset-0 z-[200] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center bg-black/60 p-4 animate-in fade-in">
             <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <h3 className={`text-xl font-bold mb-3 text-red-500`}>{t('Kujdes!', 'Warning!')}</h3>
                <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
@@ -2362,7 +2387,7 @@ export function Notepad() {
 
       {/* CONFIRMATION MODAL - DELETE CLOUD DOC */}
       {cloudDocToDelete && (
-         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+         <div className="fixed inset-0 z-[200] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center bg-black/60 p-4 animate-in fade-in">
             <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <h3 className={`text-xl font-bold mb-3 text-red-500`}>{t('Kujdes!', 'Warning!')}</h3>
                <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
@@ -2386,7 +2411,7 @@ export function Notepad() {
 
       {/* ORANGE NOTES MODAL */}
       {blueModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 sm:p-4 animate-in fade-in">
+          <div className="fixed inset-0 z-[100] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center bg-black/60 sm:p-4 animate-in fade-in">
              <div className={`w-full h-[100dvh] sm:max-w-2xl sm:h-[80vh] flex flex-col sm:rounded-2xl shadow-2xl border-0 sm:border ${isDark ? "bg-zinc-900 sm:border-blue-500/30" : "bg-white sm:border-blue-300"}`}>
                 <div className={`flex justify-between items-center p-4 border-b shrink-0 ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
                    <h3 className={`text-xl font-bold flex items-center gap-2 ${isDark ? "text-blue-500" : "text-blue-600"}`}>
@@ -2504,7 +2529,7 @@ export function Notepad() {
 
       {/* Password MODAL */}
       {passwordModal.isOpen && (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+          <div className="fixed inset-0 z-[80] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center bg-black/60 p-4 animate-in fade-in">
             <div className={`max-w-sm w-full p-6 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <div className="flex items-center gap-3 mb-4">
                   <div className={`p-2 rounded-xl ${passwordModal.type === 'setup' ? 'bg-accent-500/10 text-accent-500' : 'bg-blue-500/10 text-blue-500'}`}>
@@ -2551,7 +2576,7 @@ export function Notepad() {
 
       {/* AUTH MODAL */}
       {authModal && (
-          <div className="fixed inset-0 z-[90] flex items-start pt-8 pb-32 md:py-8 md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
+          <div className="fixed inset-0 z-[100] flex items-start pt-12 pb-[30vh] md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
              <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                 <div className="flex justify-between items-center mb-6">
                    <h3 className={`text-xl font-bold ${textColor}`}>
@@ -2613,7 +2638,7 @@ export function Notepad() {
       
       {/* DEBUG LOGS MODAL */}
       {debugLogsModal && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+          <div className="fixed inset-0 z-[200] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center bg-black/60 p-4 animate-in fade-in">
              <div className={`max-w-xl w-full p-6 rounded-2xl shadow-2xl border flex flex-col ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`} style={{ maxHeight: '80vh' }}>
                 <div className="flex justify-between items-center mb-4">
                    <h3 className={`text-lg font-bold ${isDark ? "text-white" : "text-zinc-900"}`}>Sistemi i Log-eve (Problemet e lidhjes)</h3>
@@ -2740,7 +2765,7 @@ export function Notepad() {
 
       {/* BACKUP MODAL */}
       {backupModal && (
-          <div className="fixed inset-0 z-[90] flex items-start pt-8 pb-32 md:py-8 md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
+          <div className="fixed inset-0 z-[100] flex items-start pt-12 pb-[30vh] md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
              <div className={`max-w-xl w-full max-h-[90vh] flex flex-col rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                 <div className={`flex justify-between items-center p-5 border-b ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
                    <h3 className={`text-xl font-bold flex items-center gap-2 ${textColor}`}>
@@ -2840,10 +2865,7 @@ export function Notepad() {
                       </div>
                       
                       <div className="mt-3">
-                         <button onClick={() => {
-                            if (!gistId) return showToast("Nuk ka Gist ID. Ruani një herë dokumentet fillimisht.");
-                            window.open(`https://gist.github.com/${gistId}`, "_blank");
-                         }} className={`w-full flex justify-center items-center gap-2 px-4 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm ${isDark ? "bg-zinc-700 hover:bg-zinc-600 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 border-transparent"}`}>
+                         <button onClick={viewGistContent} className={`w-full flex justify-center items-center gap-2 px-4 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm ${isDark ? "bg-zinc-700 hover:bg-zinc-600 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 border-transparent"}`}>
                             <Eye className="w-4 h-4" /> Shiko Dokumentet Online (Gist)
                          </button>
                       </div>
@@ -2853,9 +2875,35 @@ export function Notepad() {
           </div>
       )}
 
+      {/* GIST VIEWER MODAL */}
+      {gistViewerModal && (
+          <div className="fixed inset-0 z-[100] flex items-start pt-12 pb-[40vh] md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
+             <div className={`max-w-4xl w-full max-h-[85vh] flex flex-col rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
+                <div className={`flex justify-between items-center p-5 border-b ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
+                   <h3 className={`text-xl font-bold flex items-center gap-2 ${textColor}`}>
+                      <Github className="w-6 h-6 text-zinc-900 dark:text-white" /> Dokumenti Online (Gist)
+                   </h3>
+                   <button onClick={() => setGistViewerModal(false)} className="p-2 bg-transparent text-zinc-500 hover:text-red-500 transition-colors">
+                      <X className="w-5 h-5"/>
+                   </button>
+                </div>
+                <div className="p-0 overflow-y-auto flex-1 flex flex-col bg-zinc-950 text-green-400 font-mono text-xs md:text-sm">
+                   <pre className="p-4 overflow-x-auto whitespace-pre-wrap">
+                      {gistViewerContent ? JSON.stringify(JSON.parse(gistViewerContent), null, 2) : 'Duke ngarkuar...'}
+                   </pre>
+                </div>
+                <div className={`p-4 border-t flex justify-end gap-3 ${isDark ? "bg-zinc-800/50 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+                    <button onClick={() => setGistViewerModal(false)} className={`px-4 py-2 font-medium rounded-lg transition-colors border ${isDark ? "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-300" : "bg-white hover:bg-zinc-100 border-zinc-300 text-zinc-700"}`}>
+                        Mbyll
+                    </button>
+                </div>
+             </div>
+          </div>
+      )}
+
       {/* CLOUD MODAL */}
       {cloudModal && (
-          <div className="fixed inset-0 z-[90] flex items-start pt-8 pb-32 md:py-8 md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
+          <div className="fixed inset-0 z-[100] flex items-start pt-12 pb-[30vh] md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
              <div className={`max-w-2xl w-full max-h-[85vh] flex flex-col rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                 <div className={`flex justify-between items-center p-5 border-b ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
                    <h3 className={`text-xl font-bold flex items-center gap-2 ${textColor}`}>
@@ -2965,7 +3013,7 @@ export function Notepad() {
   );
 
   const pinOverlayJSX = appLocked ? (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 backdrop-blur-md animate-in fade-in">
+    <div className="fixed inset-0 z-[200] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center p-4 bg-black/40 backdrop-blur-md animate-in fade-in">
       <div className={`max-w-sm w-full p-8 rounded-3xl shadow-2xl border flex flex-col items-center ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"}`}>
           <div className="w-16 h-16 rounded-full bg-accent-500/10 flex items-center justify-center mb-6">
               <Lock className="w-8 h-8 text-accent-500" />
@@ -3990,7 +4038,7 @@ export function Notepad() {
 
             {/* PENDING AI CHANGES MODAL */}
       {pendingAiChanges && (
-         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+         <div className="fixed inset-0 z-[200] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center bg-black/60 p-4 animate-in fade-in">
             <div className={`max-w-xl w-full p-6 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <div className="flex items-center gap-3 mb-4">
                   <div className="p-2 rounded-xl bg-accent-500/10 text-accent-500">
@@ -4053,7 +4101,7 @@ export function Notepad() {
 
       {/* CONFIRMATION MODAL - CLOSE */}
       {showConfirmClose && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+         <div className="fixed inset-0 z-[100] flex items-start pt-12 pb-[30vh] md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
             <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <h3 className={`text-xl font-bold mb-3 ${textColor}`}>{t('Kthehu në Katalog', 'Return to Catalog')}</h3>
                <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{t('A i keni ruajtur ndryshimet tuaja? Nëse dilni pa ruajtur, ndryshimet e fundit nuk do të ruhen.', 'Have you saved your changes? If you exit without saving, recent changes will not be saved.')}</p>
@@ -4070,7 +4118,7 @@ export function Notepad() {
       )}
 
       {showConfirmDeleteSelected && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+         <div className="fixed inset-0 z-[100] flex items-start pt-12 pb-[30vh] md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
             <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <h3 className={`text-xl font-bold mb-3 text-red-500`}>Kujdes!</h3>
                <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>Jeni i sigurt që doni të boshatisni {selectedRows.size} rrjeshtat e zgjedhur? Ky veprim nuk mund të kthehet mbrapsht.</p>
@@ -4088,7 +4136,7 @@ export function Notepad() {
 
       {/* CONFIRMATION MODAL - CLEAR */}
       {showConfirmClear && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+         <div className="fixed inset-0 z-[100] flex items-start pt-12 pb-[30vh] md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
             <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                <h3 className={`text-xl font-bold mb-3 text-red-500`}>Kujdes!</h3>
                <p className={`mb-6 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>Jeni i sigurt që doni të boshatisni të 90 rrjeshtat? Ky veprim nuk mund të kthehet mbrapsht.</p>
@@ -4106,7 +4154,7 @@ export function Notepad() {
 
       {/* IMAGE PREVIEW MODAL */}
       {previewImage && (
-         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 p-4 animate-in fade-in" onClick={() => setPreviewImage(null)}>
+         <div className="fixed inset-0 z-[70] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center bg-black/90 p-4 animate-in fade-in" onClick={() => setPreviewImage(null)}>
             <div className="relative max-w-5xl w-full h-full flex items-center justify-center" onClick={e => e.stopPropagation()}>
                <img src={previewImage} className="max-w-full max-h-full object-contain rounded-lg" alt="Preview Full" />
                <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 p-2 bg-black/50 text-white rounded-full hover:bg-black transition-colors">
@@ -4118,7 +4166,7 @@ export function Notepad() {
 
       {/* MODAL FOR EXPANDED TEXT VIEW */}
       {activeCell && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 sm:p-4 animate-in fade-in zoom-in-95">
+          <div className="fixed inset-0 z-50 flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center bg-black/60 sm:p-4 animate-in fade-in zoom-in-95">
             <div className={`mx-auto w-full h-[100dvh] sm:max-w-4xl sm:h-[80vh] flex flex-col border-0 sm:border sm:rounded-2xl shadow-2xl overflow-hidden ${
               isDark ? "bg-zinc-900 sm:border-zinc-700" : "bg-white sm:border-zinc-300"
             }`}>
