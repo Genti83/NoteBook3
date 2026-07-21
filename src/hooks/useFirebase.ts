@@ -15,6 +15,8 @@ import {
   indexedDBLocalPersistence
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
+import { signInWithCredential } from 'firebase/auth';
 
 // Helper to log errors
 export const addDebugLog = (msg: string) => {
@@ -61,13 +63,23 @@ export function useFirebase() {
 
   const loginWithGoogle = async () => {
     try {
-      addDebugLog('Starting Google Login (Popup)');
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
+      addDebugLog('Starting Google Login (Native & Web)');
       
-      const res = await signInWithPopup(auth, provider);
-      addDebugLog('Popup login success: ' + res.user.email);
-      return res.user;
+      if (Capacitor.isNativePlatform()) {
+         addDebugLog('Native Platform detected, using Capacitor Firebase Auth');
+         const result = await FirebaseAuthentication.signInWithGoogle();
+         const credential = GoogleAuthProvider.credential(result.credential?.idToken);
+         const res = await signInWithCredential(auth, credential);
+         addDebugLog('Native login success: ' + res.user.email);
+         return res.user;
+      } else {
+         addDebugLog('Web Platform detected, using signInWithPopup');
+         const provider = new GoogleAuthProvider();
+         provider.setCustomParameters({ prompt: 'select_account' });
+         const res = await signInWithPopup(auth, provider);
+         addDebugLog('Web login success: ' + res.user.email);
+         return res.user;
+      }
     } catch(err: any) {
       addDebugLog('Google Login Exception: ' + err.message);
       throw err;
