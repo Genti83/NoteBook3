@@ -152,6 +152,8 @@ const HeaderInput = React.memo(({ initialValue, onChange, className, placeholder
 export function Notepad() {
   const [documents, setDocuments] = useState<GridDocument[]>([]);
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
+  const activeDocIdRef = useRef<string | null>(null);
+  useEffect(() => { activeDocIdRef.current = activeDocId; }, [activeDocId]);
   const [isDark, setIsDark] = useState(true);
   
   const [viewportHeight, setViewportHeight] = useState('100dvh');
@@ -843,7 +845,23 @@ export function Notepad() {
                    const newMerged = Array.from(mergedMap.values()).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
                    localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(newMerged));
                    
-                   // Push any newer local docs to cloud silently
+                   
+                 // Nese kemi nje dokument hapur, e perditesojme nese erdhi i ri nga cloud
+                 const currActiveId = activeDocIdRef.current;
+                 if (currActiveId) {
+                     const currentViewingDoc = newMerged.find(x => x.id === currActiveId);
+                     const oldViewingDoc = prevLocal.find(x => x.id === currActiveId);
+                     if (currentViewingDoc && oldViewingDoc && currentViewingDoc.updatedAt !== oldViewingDoc.updatedAt) {
+                         // We use a custom event or a setState callback workaround, but React states inside prevLocal setter 
+                         // shouldn't trigger other state updates directly if possible, or they can.
+                         // P.sh.:
+                         setTimeout(() => {
+                             window.dispatchEvent(new CustomEvent('cloud-doc-updated', { detail: currentViewingDoc }));
+                         }, 10);
+                     }
+                 }
+
+                 // Push any newer local docs to cloud silently
                    newMerged.forEach(async (docObj) => {
                        const cloudVersion = fetched.find(c => c.id === docObj.id);
                        if (!cloudVersion || new Date(docObj.updatedAt) > new Date(cloudVersion.updatedAt)) {
@@ -1069,6 +1087,22 @@ export function Notepad() {
   useEffect(() => {
      latestDocsRef.current = documents;
   }, [documents]);
+
+  useEffect(() => {
+     const handleCloudUpdate = (e: any) => {
+         const docObj = e.detail;
+         if (docObj && docObj.id === activeDocIdRef.current) {
+             setRows(docObj.rows);
+             setHeaders(docObj.headers);
+             setTitle(docObj.title);
+             if (docObj.columnWidths) setColumnWidths(docObj.columnWidths);
+             if (docObj.tags) setActiveTags(docObj.tags);
+             showToast("Dokumenti u përditësua nga Cloud.");
+         }
+     };
+     window.addEventListener('cloud-doc-updated', handleCloudUpdate);
+     return () => window.removeEventListener('cloud-doc-updated', handleCloudUpdate);
+  }, []);
 
   useEffect(() => {
     const handleBeforeUnload = () => {
