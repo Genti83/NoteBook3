@@ -888,12 +888,18 @@ export function Notepad() {
           let msg = "Gabim: " + err.message;
           if (err.code === 'auth/email-already-in-use') {
              setIsSignUp(false);
-             showToast("Llogaria ekziston. Po kalojmë tek Hyrja. Klikoni Hyr përsëri.");
+             showToast("Kjo llogari ekziston tashmë! Provo të hysh (Login) ose përdor Google.");
              return;
           }
           if (err.code === 'auth/weak-password') msg = "Fjalëkalimi duhet të ketë të paktën 6 karaktere.";
           if (err.code === 'auth/invalid-email') msg = "Formati i emailit është i pasaktë.";
-          if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = "Emaili ose fjalëkalimi i gabuar.";
+          if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+             msg = "Kredenciale të gabuara! Nëse jeni regjistruar me Google, klikoni butonin Google.";
+          }
+          if (err.code === 'auth/operation-not-allowed') {
+             msg = "Ky opsion nuk është i lejuar nga Firebase. Ju lutem përdorni Hyrjen me Google.";
+          }
+          
           showToast(msg);
       }
   };
