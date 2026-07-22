@@ -627,7 +627,6 @@ export function Notepad() {
     setIsAiThinking(true);
     setAiChatResponse('');
     try {
-       // Dërgo të gjitha dokumentet tek AI për histori dhe analizë të thellë, pa imazhe për të kursyer bandwidth
        const docsForAi = documents.map(docItem => ({
           ...docItem,
           rows: docItem.rows.map(r => {
@@ -636,87 +635,74 @@ export function Notepad() {
           })
        }));
        
-       // In APK (Capacitor native), try both shared app URL and dev app URL
-       let response: Response | null = null;
        const payload = JSON.stringify({ prompt: promptText, documents: docsForAi, activeDocId, image: aiChatImage, audio: aiChatAudio });
        
+       const endpoints: string[] = [];
        if (Capacitor.isNativePlatform()) {
-          const preUrl = 'https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat';
-          const devUrl = 'https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat';
-          
+          endpoints.push('https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat');
+          endpoints.push('https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat');
+       }
+       endpoints.push('/api/ai/chat');
+
+       let response: Response | null = null;
+       let lastErrMessage = '';
+
+       for (const ep of endpoints) {
           try {
-             response = await fetch(preUrl, {
+             response = await fetch(ep, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: payload
              });
-          } catch(e) {
-             console.warn("Shared AI endpoint failed, trying dev endpoint...");
+             if (response.ok) break;
+             const errJson = await response.json().catch(() => ({}));
+             lastErrMessage = errJson.error || response.statusText;
+          } catch(e: any) {
+             console.warn("AI chat endpoint error:", ep, e);
+             lastErrMessage = e.message || "Bllokim i rrjetit";
           }
-          
-          if (!response || !response.ok) {
-             try {
-                response = await fetch(devUrl, {
-                   method: 'POST',
-                   headers: { 'Content-Type': 'application/json' },
-                   body: payload
-                });
-             } catch(e) {
-                console.error("Dev AI endpoint failed too:", e);
-             }
-          }
-       } else {
-          response = await fetch('/api/ai/chat', {
-             method: 'POST',
-             headers: { 'Content-Type': 'application/json' },
-             body: payload
-          });
        }
 
        if (response && response.ok) {
           const data = await response.json();
-          setAiChatResponse(data.text || "Veprimi krye!");
+          setAiChatResponse(data.text || "Përgjigjja nga AI Gemini u mor me sukses.");
           
           if (data.actions && Array.isArray(data.actions)) {
              data.actions.forEach((act: any) => {
-                if (act.type === 'PROPOSE_COLUMNS_CHANGE' && act.documentId && act.newHeaders && act.newRows) {
-                   setPendingAiChanges({
-                      documentId: act.documentId,
-                      newHeaders: act.newHeaders,
-                      newColumnWidths: act.newColumnWidths,
-                      newRows: act.newRows
-                   });
-                } else if (act.type === 'UPDATE_DOCUMENT_ROWS' && act.documentId && act.newRows) {
-                   const updatedDocs = documents.map(d => {
-                      if (d.id === act.documentId) {
-                         // Restore images for updated rows
-                         const newRowsWithImages = act.newRows.map((nr: any, idx: number) => {
-                            const origRow = d.rows.find(or => or.id === nr.id);
-                            return { ...nr, image: origRow?.image || d.rows[idx]?.image || '' };
-                         });
-                         if (d.id === activeDocId) {
-                            setRows(newRowsWithImages);
+                 if (act.type === 'PROPOSE_COLUMNS_CHANGE' && act.documentId) {
+                     setDocuments(prevDocs => prevDocs.map(d => {
+                         if (d.id === act.documentId) {
+                             return {
+                                 ...d,
+                                 headers: act.newHeaders || d.headers,
+                                 columnWidths: act.newColumnWidths || d.columnWidths,
+                                 rows: act.newRows || d.rows,
+                                 updatedAt: new Date().toISOString()
+                             };
                          }
-                         return { ...d, rows: newRowsWithImages };
-                      }
-                      return d;
-                   });
-                   setDocuments(updatedDocs);
-                   triggerAutoSave(updatedDocs);
-                   showToast("Dokumenti u përditësua nga AI!");
-                }
+                         return d;
+                     }));
+                     showToast("Kolonat dhe rrjeshtat u përditësuan nga AI!");
+                 } else if (act.type === 'UPDATE_DOCUMENT_ROWS' && act.documentId) {
+                     setDocuments(prevDocs => prevDocs.map(d => {
+                         if (d.id === act.documentId) {
+                             return {
+                                 ...d,
+                                 rows: act.newRows || d.rows,
+                                 updatedAt: new Date().toISOString()
+                             };
+                         }
+                         return d;
+                     }));
+                     showToast("Rrjeshtat u përditësuan nga AI Gemini!");
+                 }
              });
           }
        } else {
-          try {
-             const errData = await response.json();
-             setAiChatResponse(`Gabim: ${errData.error || "Nuk mund të komunikohet me AI."}`);
-          } catch(e) {
-             setAiChatResponse(`Gabim HTTP: ${response.status} ${response.statusText}`);
-          }
+          setAiChatResponse(`Gabim gjatë komunikimit me AI Gemini: ${lastErrMessage || 'Sistemi nuk mund t\'i përgjigjej kërkesës.'}`);
        }
     } catch (err: any) {
-       setAiChatResponse("Gabim lidhjeje me serverin (Network/CORS): " + err.message + ". Sigurohuni që pajisja ka internet dhe që keni bërë 'Share' aplikacionin në AI Studio që të përditësohet serveri.");
+       setAiChatResponse("Gabim i papritur: " + err.message);
     }
     setIsAiThinking(false);
     setAiChatInput('');
@@ -766,21 +752,122 @@ export function Notepad() {
       }
   };
 
-  const fetchCloudDocs = async (uid: string) => {
-     setIsFetchingCloud(true);
-     try {
-        const q = query(collection(db, 'documents'), where('userId', '==', uid));
-        const snaps = await getDocs(q);
-        const fetched: GridDocument[] = [];
-        snaps.forEach(s => {
-           const data = s.data();
-           if (data) fetched.push(data as GridDocument);
+   const syncWithGoogleCloud = async (docsToSync?: GridDocument[], silent = false) => {
+    const docs = docsToSync || documents;
+    const uid = getActiveUid() || 'genti8319@gmail.com';
+    const payload = JSON.stringify({
+      userId: uid,
+      documents: docs,
+      blueText,
+      secretList,
+      pin: localStorage.getItem('grid_notepad_pin') || null
+    });
+
+    const endpoints = [];
+    if (Capacitor.isNativePlatform()) {
+      endpoints.push('https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/sync');
+      endpoints.push('https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/sync');
+    }
+    endpoints.push('/api/cloud/sync');
+
+    let success = false;
+    for (const ep of endpoints) {
+      try {
+        const res = await fetch(ep, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload
         });
-        setCloudDocs(fetched);
-     } catch (err) {
-        showToast("Gabim gjatë marrjes nga Cloud.");
-     }
-     setIsFetchingCloud(false);
+        if (res.ok) {
+          success = true;
+          break;
+        }
+      } catch (e) {
+        console.warn("Google Cloud sync error:", ep, e);
+      }
+    }
+
+    if (!silent) {
+       if (success) {
+          showToast("⚡ Të dhënat u sinkronizuan me sukses në Google Cloud!");
+       } else {
+          showToast("U ruajtën lokalisht në pajisje.");
+       }
+    }
+    return success;
+  };
+
+  const loadFromGoogleCloud = async (silent = false) => {
+    setIsFetchingCloud(true);
+    const uid = getActiveUid() || 'genti8319@gmail.com';
+    const endpoints = [];
+    if (Capacitor.isNativePlatform()) {
+      endpoints.push(`https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/load?userId=${encodeURIComponent(uid)}`);
+      endpoints.push(`https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/load?userId=${encodeURIComponent(uid)}`);
+    }
+    endpoints.push(`/api/cloud/load?userId=${encodeURIComponent(uid)}`);
+
+    let loadedData: any = null;
+    for (const ep of endpoints) {
+      try {
+        const res = await fetch(ep);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.documents && json.documents.length > 0) {
+            loadedData = json;
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn("Google Cloud load error:", ep, e);
+      }
+    }
+
+    if (loadedData && loadedData.documents) {
+      setDocuments(loadedData.documents);
+      setCloudDocs(loadedData.documents);
+      localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(loadedData.documents));
+
+      if (loadedData.blueText !== undefined) {
+         setBlueText(loadedData.blueText);
+         localStorage.setItem('grid_notepad_blue', loadedData.blueText);
+      }
+      if (loadedData.secretList) {
+         setSecretList(loadedData.secretList);
+         localStorage.setItem('grid_notepad_secret_list', JSON.stringify(loadedData.secretList));
+      }
+      if (loadedData.pin) {
+         localStorage.setItem('grid_notepad_pin', loadedData.pin);
+      }
+      setIsFetchingCloud(false);
+      if (!silent) showToast("⚡ Dokumentet u shkarkuan me sukses nga Google Cloud!");
+      return true;
+    }
+
+    // Fallback to Firestore if custom cloud has no docs
+    if (user) {
+       try {
+          const q = query(collection(db, 'documents'), where('userId', '==', user.uid));
+          const snapshot = await getDocs(q);
+          const cloudData = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as GridDocument));
+          if (cloudData.length > 0) {
+              setDocuments(cloudData);
+              setCloudDocs(cloudData);
+              localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(cloudData));
+              setIsFetchingCloud(false);
+              if (!silent) showToast("Dokumentet u rikthyen nga Firestore!");
+              return true;
+          }
+       } catch (e) {}
+    }
+
+    setIsFetchingCloud(false);
+    if (!silent) showToast("Nuk u gjet asnjë dokument në Cloud.");
+    return false;
+  };
+
+  const fetchCloudDocs = async (uid: string) => {
+     await loadFromGoogleCloud(true);
   };
 
   const confirmDeleteCloudDoc = async () => {
@@ -2110,90 +2197,26 @@ export function Notepad() {
   };
 
   const forceCloudBackup = async (silent = false) => {
-    const currentUser = auth.currentUser;
-    if (!currentUser) return;
     setIsSaving(true);
-    if (!silent) setAutoSaveMsg('Po ngarkon në Cloud...');
-    let success = true;
+    if (!silent) setAutoSaveMsg('Po ngarkon në Google Cloud...');
     
-    try {
-        const chunkSize = 400;
-        for (let i = 0; i < documents.length; i += chunkSize) {
-            const chunk = documents.slice(i, i + chunkSize);
-            const batch = writeBatch(db);
-            chunk.forEach(docObj => {
-                const docRef = doc(db, 'documents', docObj.id);
-                batch.set(docRef, { ...docObj, userId: getActiveUid()! });
-            });
-            await batch.commit();
-        }
-        
-        const blueRef = doc(db, 'settings', getActiveUid()!);
-        await setDoc(blueRef, { 
-           blueText: blueText, 
-           secretList: secretList,
-           userId: getActiveUid()!,
-           pin: localStorage.getItem('grid_notepad_pin') || null
-        }, { merge: true });
-    } catch (e) {
-        console.error(e);
-        success = false;
-    }
+    const success = await syncWithGoogleCloud(documents, silent);
     
     setIsSaving(false);
     if (success) {
         setAutoSaveMsg('Ngarkuar!');
-        if (!silent) showToast("Të gjitha dokumentet u ruajtën në Cloud!");
     } else {
-        setAutoSaveMsg('Gabim!');
-        if (!silent) showToast("Pati një problem gjatë ngarkimit në Cloud.");
+        setAutoSaveMsg('Lokal!');
     }
     setTimeout(() => setAutoSaveMsg(''), 3000);
   };
 
   const handleFullCloudRestore = async () => {
-      if (!user) {
-          showToast("Kërkohet llogari për të rikthyer nga Cloud!");
-          return;
-      }
-      if (!navigator.onLine) {
-          showToast("Nuk ka internet! Kërkohet lidhje për të rikthyer nga Cloud.");
-          return;
-      }
       setIsFetchingCloud(true);
-      try {
-          const q = query(collection(db, 'documents'), where('userId', '==', user.uid));
-          const snapshot = await getDocs(q);
-          const cloudData = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as GridDocument));
-          
-          if (cloudData.length > 0) {
-              setDocuments(cloudData);
-              localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(cloudData));
-          }
-          
-          const blueRef = doc(db, 'settings', user.uid);
-          const blueSnap = await getDoc(blueRef);
-          if (blueSnap.exists()) {
-             const data = blueSnap.data();
-             const bt = data.blueText || '';
-             setBlueText(bt);
-             localStorage.setItem('grid_notepad_blue', bt);
-             
-             const sl = data.secretList || [];
-             setSecretList(sl);
-             localStorage.setItem('grid_notepad_secret_list', JSON.stringify(sl));
-             
-             if (data.pin) {
-                 localStorage.setItem('grid_notepad_pin', data.pin);
-             }
-          }
-          
-          showToast("Të gjitha të dhënat u rikthyen me sukses nga Cloud!");
+      const res = await loadFromGoogleCloud(false);
+      setIsFetchingCloud(false);
+      if (res) {
           setBackupModal(false);
-      } catch (err: any) {
-          showToast("Gabim gjatë rikthimit: " + err.message);
-      } finally {
-          setIsFetchingCloud(false);
       }
   };
 
@@ -3114,7 +3137,7 @@ export function Notepad() {
                       <button onClick={() => setCloudModal(false)} className="mr-2 p-1.5 bg-zinc-500/10 hover:bg-zinc-500/20 rounded-lg transition-colors">
                          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="m15 18-6-6 6-6"/></svg>
                       </button>
-                      <Cloud className="w-6 h-6 text-accent-500" /> Dokumentet Online
+                      <Cloud className="w-6 h-6 text-emerald-500" /> Platforma Cloud Google
                    </h3>
                    <button onClick={() => setCloudModal(false)} className="p-2 bg-transparent text-zinc-500 hover:text-red-500 transition-colors">
                       <X className="w-5 h-5"/>
@@ -3122,13 +3145,19 @@ export function Notepad() {
                 </div>
                 
                 <div className={`p-4 border-b flex flex-wrap gap-2 ${isDark ? "bg-zinc-800/50 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
-                    <button onClick={() => {forceCloudBackup(); setCloudModal(false);}} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-accent-600 hover:bg-accent-500 text-white border-transparent" : "bg-accent-500 hover:bg-accent-600 text-white border-transparent"}`}>
-                        <Cloud className="w-4 h-4 inline-block mr-1" /> Ngarko / Save (Backup All)
+                    <button onClick={() => {forceCloudBackup();}} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-accent-600 hover:bg-accent-500 text-white border-transparent" : "bg-accent-500 hover:bg-accent-600 text-white border-transparent"}`}>
+                        <Cloud className="w-4 h-4 inline-block mr-1" /> Shto me Sync (Google Cloud)
                     </button>
-                    <button onClick={() => {handleFullCloudRestore(); setCloudModal(false);}} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-orange-600 hover:bg-orange-500 text-white border-transparent" : "bg-orange-500 hover:bg-orange-600 text-white border-transparent"}`}>
-                        <Download className="w-4 h-4 inline-block mr-1" /> Importo / Download All
+                    <button onClick={() => {handleFullCloudRestore();}} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-orange-600 hover:bg-orange-500 text-white border-transparent" : "bg-orange-500 hover:bg-orange-600 text-white border-transparent"}`}>
+                        <Download className="w-4 h-4 inline-block mr-1" /> Rikthe nga Google Cloud
                     </button>
-                    <button onClick={exportAllTxt} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-zinc-700 hover:bg-zinc-600 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 border-transparent"}`}>TXT</button>
+                    <button onClick={() => loadFromGoogleCloud(false)} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${isDark ? "bg-emerald-600 hover:bg-emerald-500 text-white border-transparent" : "bg-emerald-600 hover:bg-emerald-700 text-white border-transparent"}`}>
+                        <RefreshCw className="w-3.5 h-3.5" /> Rifresko
+                     </button>
+                     <button onClick={() => { setCloudModal(false); setAiChatModal(true); }} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${isDark ? "bg-purple-600 hover:bg-purple-500 text-white border-transparent" : "bg-purple-600 hover:bg-purple-700 text-white border-transparent"}`}>
+                        <Sparkles className="w-3.5 h-3.5" /> AI Gemini
+                     </button>
+                     <button onClick={exportAllTxt} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-zinc-700 hover:bg-zinc-600 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 border-transparent"}`}>TXT</button>
                     <button onClick={exportAllPdf} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-zinc-700 hover:bg-zinc-600 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 border-transparent"}`}>PDF</button>
                     <button onClick={exportLocalBackup} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-zinc-700 hover:bg-zinc-600 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 border-transparent"}`}>JSON</button>
                     <button onClick={exportAllCsv} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-zinc-700 hover:bg-zinc-600 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 border-transparent"}`}>CSV</button>

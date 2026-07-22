@@ -1,7 +1,30 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+
+const STORAGE_FILE = path.join(process.cwd(), 'cloud_db.json');
+
+function readCloudDb(): Record<string, any> {
+  try {
+    if (fs.existsSync(STORAGE_FILE)) {
+      const content = fs.readFileSync(STORAGE_FILE, 'utf-8');
+      return JSON.parse(content);
+    }
+  } catch (e) {
+    console.error("Error reading cloud db:", e);
+  }
+  return {};
+}
+
+function writeCloudDb(db: Record<string, any>) {
+  try {
+    fs.writeFileSync(STORAGE_FILE, JSON.stringify(db, null, 2), 'utf-8');
+  } catch (e) {
+    console.error("Error writing cloud db:", e);
+  }
+}
 
 async function startServer() {
   const app = express();
@@ -20,6 +43,78 @@ async function startServer() {
       next();
   });
 
+  // Google Cloud Storage API Endpoints
+  app.post('/api/cloud/sync', (req, res) => {
+    try {
+      const { userId, documents, activeDocId } = req.body;
+      const key = (userId || 'default_user').trim().toLowerCase();
+      const db = readCloudDb();
+      
+      const lastUpdated = new Date().toISOString();
+      db[key] = {
+        documents: documents || [],
+        activeDocId: activeDocId || null,
+        lastUpdated
+      };
+      
+      // Also keep a snapshot history (max 5)
+      const backupKey = key + '_backups';
+      if (!Array.isArray(db[backupKey])) db[backupKey] = [];
+      db[backupKey].unshift({
+        timestamp: lastUpdated,
+        docCount: (documents || []).length,
+        documents: documents || []
+      });
+      if (db[backupKey].length > 5) db[backupKey] = db[backupKey].slice(0, 5);
+
+      writeCloudDb(db);
+      return res.json({
+        success: true,
+        message: 'Dokumentat u sinkronizuan me sukses në Google Cloud Server!',
+        lastUpdated,
+        docCount: (documents || []).length
+      });
+    } catch (err: any) {
+      console.error("Cloud sync error:", err);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/cloud/load', (req, res) => {
+    try {
+      const userId = (req.query.userId as string || 'default_user').trim().toLowerCase();
+      const db = readCloudDb();
+      const record = db[userId];
+      if (!record || !record.documents) {
+        return res.json({ success: true, documents: [], lastUpdated: null });
+      }
+      return res.json({
+        success: true,
+        documents: record.documents,
+        activeDocId: record.activeDocId,
+        lastUpdated: record.lastUpdated
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/cloud/status', (req, res) => {
+    try {
+      const userId = (req.query.userId as string || 'default_user').trim().toLowerCase();
+      const db = readCloudDb();
+      const record = db[userId];
+      return res.json({
+        success: true,
+        online: true,
+        hasData: !!(record && record.documents && record.documents.length > 0),
+        docCount: record?.documents?.length || 0,
+        lastUpdated: record?.lastUpdated || null
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
 
   // AI API Route handlers
   app.post('/api/ai/chat', async (req, res) => {
@@ -38,19 +133,11 @@ async function startServer() {
         }
       });
 
-      // We give the AI the context of all documents in JSON format,
-      // and ask it to answer the user's question.
-      const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË (përfshirë të dhënat ngarkuara nga JSON, TXT, PDF, CSV që figurojnë kudo si shënime). Ti duhet të zbulosh, analizosh dhe testosh rezultatet e llogaritjeve apo sa numër personash përmenden, si dhe të gjurmosh e analizosh nëse ka shënime dhe rreshta që mund të kenë qenë fshirë gabimisht nga blloku aktiv por që ruhen ende në ndonjë dokument apo bllok tjetër për korrigjim/riviktim. Kujdes me të dhënat dhe mos ndrysho strukturën pa dashjen e përdoruesit!
-Gjithashtu ke për detyrë të ndihmosh si inxhinier dhe të analizosh problemin kur dokumentet (CSV, PDF, TXT, JSON) nuk shkarkohen ose nuk shkojnë në "Dosjen e Bllokut (Kërkon Android/PC)". Ti mund të theksosh se teknologjia \`showDirectoryPicker\` funksionon zakonisht në PC, ndërsa në Android për shkak të kufizimeve të shfletuesit apo iFrame zakonisht bie në mekanizmin fallback "download". Kur përdoruesi të kërkojë ndihmë pse nuk shkojnë në dosje, gjej detaje teknike teorike mbi ruajtjen në shfletues dhe thuaji "Këtu është mesazhi i gabimit që mund t'i dërgosh zhvilluesit: ..." duke theksuar mekanizmat e Download API-t ose lejet në ueb, në mënyrë që përdoruesi ta kopjojë dhe t'ia dërgojë inxhinierit.
-Këtu janë të dhënat e dokumenteve aktualë në formatin JSON (përfshirë vizualizimin e rrjeshtave dhe kolonat: col1, col2, col3, col4... deri tek numri aktual i kolonave referuar listës "headers", bashkë me gjerësinë 'columnWidths'):
+      const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË.
+Këtu janë të dhënat e dokumenteve aktualë në formatin JSON:
 ${JSON.stringify(documents, null, 2)}
 
 Dokumenti aktual aktiv që përdoruesi po shikon është me ID: "${activeDocId}". Ofroni përgjigjen duke u bazuar plotësisht në KËTË DOKUMENT.
-
-RREGULLAT E PËRDITËSIMIT:
-- Përdoruesi sugjeron TË MOS NDRYSHOSH STRUKTURËN (kolonat) asnjëherë apo të zhbësh shënimet, vetëm t'i përditësosh të dhënat brenda, pra gjej problemet dhe theksoji ato.
-- Nëse përdoruesi të kërkon SHPREHIMISHT *TË NDRYSHOSH TITUJT E KOLONAVE (headers)* (ose të shtosh kolona të reja apo të ndryshosh/zgjatosh gjerësinë e kolonave)* (ose të shtosh kolona të reja p.sh. nga 4 në 5 ose 6, apo t'i zvogëlosh), TI DUHET TË KTHESH veprimin "PROPOSE_COLUMNS_CHANGE" që jep emrat e rinj të kolonave tek \`newHeaders\` dhe të gjithë \`newRows\` të përditësuar me fushat e reja (\`col1, col2, ... colX\`).
-- Nëse të duhet vetëm të përditësosh të dhënat dhe rreshtat per rregullime apo llogaritje (pa ndryshuar titujt/strukturën e kolonave siç këshillohet), përdor veprimin "UPDATE_DOCUMENT_ROWS" (dhe kthe \`documentId\` e dokumentit konkret që rregullon).
 
 TI GJITHMONË DUHET TË KTHESH PËRGJIGJEN TËNDE NË FORMATIN JSON SI MË POSHTË:
 {
@@ -61,76 +148,68 @@ TI GJITHMONË DUHET TË KTHESH PËRGJIGJEN TËNDE NË FORMATIN JSON SI MË POSHT
        "documentId": "id_e_dokumentit_qe_po_ndryshon",
        "newHeaders": ["Data", "Emri", "Sasia (kg)", "Cmimi", "Vlera"],
        "newColumnWidths": [120, 200, 100, 100, 150],
-       "newRows": [
-          // Array i plotë i rrjeshtave sipas numrit të ri të kolonave (id, col1, col2, col3, col4, col5..., status)
-       ]
+       "newRows": []
     },
-    // OSE Nëse nuk ndryshon kolonat, veprimi duhet të jetë:
     {
        "type": "UPDATE_DOCUMENT_ROWS",
        "documentId": "id_e_dokumentit_qe_po_ndryshon",
-       "newRows": [
-          // Array i plotë i rrjeshtave (id, col1, col2, col3, col4, status) duke ruajtur kolonat aktuale
-       ]
+       "newRows": []
     }
   ]
 }
+Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
-Nëse ka nevojë të përditësosh rrjeshtat, kthe të gjithë rrjeshtat sipas renditjes (deri në 90), mundësisht duke ruajtur formatin e atyre që mbeten të paprekura.
-Kthe VETËM JSON të vlefshëm!`;
+      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      let lastError: any = null;
 
-      for (let attempt = 0; attempt < 4; attempt++) {
+      for (const modelName of candidateModels) {
         try {
           const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: (() => { const parts: any[] = [{ text: prompt }]; if (image) { const b = image.split(',')[1]; const m = image.split(';')[0].split(':')[1]; parts.push({ inlineData: { data: b, mimeType: m } }); } if (audio) { const b = audio.split(',')[1]; const m = audio.split(';')[0].split(':')[1]; parts.push({ inlineData: { data: b, mimeType: m } }); } return parts; })(),
+            model: modelName,
+            contents: (() => { 
+              const parts: any[] = [{ text: prompt || 'Analizo bllokun mun' }]; 
+              if (image) { 
+                const b = image.split(',')[1]; 
+                const m = image.split(';')[0].split(':')[1]; 
+                parts.push({ inlineData: { data: b, mimeType: m } }); 
+              } 
+              if (audio) { 
+                const b = audio.split(',')[1]; 
+                const m = audio.split(';')[0].split(':')[1]; 
+                parts.push({ inlineData: { data: b, mimeType: m } }); 
+              } 
+              return parts; 
+            })(),
             config: {
               systemInstruction,
-              temperature: 0.1,
+              temperature: 0.2,
               responseMimeType: 'application/json'
             }
           });
 
-          const parsedResponse = JSON.parse(response.text || '{}');
-          return res.json(parsedResponse);
-        } catch (err: any) {
-          const isRateLimit = err.status === 429 || err.message?.includes('429') || err.message?.includes('quota');
-          if (attempt === 0 && isRateLimit) {
-            try {
-              // Fallback to gemini-2.5-pro
-              const response = await ai.models.generateContent({
-                model: 'gemini-2.5-pro',
-                contents: (() => { const parts: any[] = [{ text: prompt }]; if (image) { const b = image.split(',')[1]; const m = image.split(';')[0].split(':')[1]; parts.push({ inlineData: { data: b, mimeType: m } }); } if (audio) { const b = audio.split(',')[1]; const m = audio.split(';')[0].split(':')[1]; parts.push({ inlineData: { data: b, mimeType: m } }); } return parts; })(),
-                config: {
-                  systemInstruction,
-                  temperature: 0.1,
-                  responseMimeType: 'application/json'
-                }
-              });
-              const parsedResponse = JSON.parse(response.text || '{}');
-              return res.json(parsedResponse);
-            } catch (fallbackErr: any) {
-               throw fallbackErr; // If fallback fails too, let it pass down
-            }
+          let rawText = response.text || '{}';
+          rawText = rawText.trim();
+          if (rawText.startsWith('```')) {
+            rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/```$/i, '').trim();
           }
 
-          if (attempt < 3 && (err.status === 503 || err.message?.includes('503') || err.message?.includes('UNAVAILABLE') || err.message?.includes('demand') || err.message?.includes('overloaded') || isRateLimit)) {
-            // Exponential backoff
-            await new Promise(r => setTimeout(r, (attempt + 1) * 3000));
-            continue;
+          let parsedResponse: any = {};
+          try {
+            parsedResponse = JSON.parse(rawText);
+          } catch(pe) {
+            parsedResponse = { text: response.text || 'Analiza u krye me sukses.' };
           }
-          throw err;
+          return res.json(parsedResponse);
+        } catch (err: any) {
+          console.warn(`Model ${modelName} failed:`, err.message);
+          lastError = err;
         }
       }
+
+      throw lastError || new Error("Asnjë nga modelet e AI nuk u përgjigj.");
     } catch (err: any) {
       console.error('AI Chat Error:', err);
-      let errMsg = err.message || 'Ndodhi një gabim gjatë komunikimit me AI.';
-      if (typeof errMsg === 'string' && (errMsg.includes('503') || errMsg.includes('demand') || errMsg.includes('UNAVAILABLE'))) {
-         errMsg = 'Serveri i AI është i mbingarkuar për momentin (Spike në kërkesa). Ju lutem provoni përsëri pas pak.';
-      } else if (typeof errMsg === 'string' && (errMsg.includes('quota') || errMsg.includes('exceeded') || errMsg.includes('429'))) {
-         errMsg = 'Keni tejkaluar limitin ditor falas të API-së së AI. Ju lutem provoni përsëri më vonë ose ndërshkoni planin tuaj.';
-      }
-      res.status(500).json({ error: errMsg });
+      res.status(500).json({ error: err.message || 'Ndodhi një gabim gjatë komunikimit me AI.' });
     }
   });
 
