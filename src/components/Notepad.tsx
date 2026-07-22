@@ -366,7 +366,7 @@ export function Notepad() {
   const [appLockInput, setAppLockInput] = useState('');
 
   const [authModal, setAuthModal] = useState(false);
-  const { user, loading, loginWithGoogle: hookGoogleLogin, loginWithEmail: hookEmailLogin, registerWithEmail: hookEmailRegister, logout: hookLogout } = useFirebase();
+  const { user, loading, loginWithGoogle: hookGoogleLogin, loginWithEmail: hookEmailLogin, registerWithEmail: hookEmailRegister, loginAnonymously: hookAnonymousLogin, logout: hookLogout } = useFirebase();
   const [email, setEmail] = useState(() => localStorage.getItem('grid_notepad_saved_email') || '');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
@@ -636,16 +636,44 @@ export function Notepad() {
           })
        }));
        
-       // Use production URL if running on native (Capacitor) because the local server isn't running there.
-       // Kemi vendosur URL e Dev per te lejuar testimin e menjehershem ne APK.
-       // Pasi te besh Deploy/Share nga AI Studio, mund ta ndryshosh tek URL pre.
-       const baseUrl = Capacitor.isNativePlatform() ? 'https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app' : '';
-       const response = await fetch(baseUrl + '/api/ai/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: promptText, documents: docsForAi, activeDocId, image: aiChatImage, audio: aiChatAudio })
-       });
-       if (response.ok) {
+       // In APK (Capacitor native), try both shared app URL and dev app URL
+       let response: Response | null = null;
+       const payload = JSON.stringify({ prompt: promptText, documents: docsForAi, activeDocId, image: aiChatImage, audio: aiChatAudio });
+       
+       if (Capacitor.isNativePlatform()) {
+          const preUrl = 'https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat';
+          const devUrl = 'https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat';
+          
+          try {
+             response = await fetch(preUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload
+             });
+          } catch(e) {
+             console.warn("Shared AI endpoint failed, trying dev endpoint...");
+          }
+          
+          if (!response || !response.ok) {
+             try {
+                response = await fetch(devUrl, {
+                   method: 'POST',
+                   headers: { 'Content-Type': 'application/json' },
+                   body: payload
+                });
+             } catch(e) {
+                console.error("Dev AI endpoint failed too:", e);
+             }
+          }
+       } else {
+          response = await fetch('/api/ai/chat', {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: payload
+          });
+       }
+
+       if (response && response.ok) {
           const data = await response.json();
           setAiChatResponse(data.text || "Veprimi krye!");
           
@@ -1004,8 +1032,27 @@ export function Notepad() {
          } else if (err.code === 'auth/operation-not-allowed') {
              alert("Kujdes: Hyrja me Google nuk është e aktivizuar në Firebase!\n\nJu lutem shkoni tek Firebase Console -> Authentication -> Sign-in method dhe aktivizoni 'Google'.");
          } else {
-             alert("Gabim gjatë hyrjes me Google:\n" + err.message + "\n\nNëse jeni në APK/Android dhe Google Sign-in nuk funksionon, kyçuni me Email/Password.");
+             alert("Gabim gjatë hyrjes me Google:\n" + err.message + "\n\nNëse jeni në APK/Android, përdorni 'Aktivizo Cloud Menjëherë (Fast Cloud)' ose Email/Password për të qëndruar brenda aplikacionit APK!");
          }
+      }
+  };
+
+  const handleAnonymousAuth = async () => {
+      try {
+          showToast("Po lidhemi me Cloud...");
+          await hookAnonymousLogin();
+          showToast("Hyrje e shpejtë e suksesshme! Llogaria Cloud u aktivizua.");
+          localStorage.setItem('grid_cloud_sync_freq', '5000');
+          setCloudSyncFrequency(5000);
+          localStorage.removeItem('grid_notepad_custom_uid');
+          setAuthModal(false);
+          if (documents.length === 0 || (documents.length === 1 && documents[0].rows.length === 0)) {
+             setTimeout(() => handleFullCloudRestore(), 1000);
+          } else {
+             setTimeout(() => forceCloudBackup(), 1500);
+          }
+      } catch (err: any) {
+          showToast("Gabim gjatë lidhjes me Cloud: " + err.message);
       }
   };
   
@@ -2728,18 +2775,28 @@ export function Notepad() {
                       }`}
                    />
                    <button type="submit" className="w-full py-3 bg-accent-600 hover:bg-accent-500 text-white font-medium rounded-xl transition-colors shadow-lg">
-                      {isSignUp ? 'Krijo Llogari' : 'Hyr'}
+                      {isSignUp ? 'Krijo Llogari me Email' : 'Hyr me Email'}
                    </button>
-                   <div className="flex items-center gap-4 my-2">
+                   
+                   <div className="flex items-center gap-4 my-1">
                       <div className={`flex-1 h-px ${isDark ? "bg-zinc-800" : "bg-zinc-200"}`}></div>
-                      <span className={`text-sm ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Ose</span>
+                      <span className={`text-xs uppercase tracking-wider font-bold ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Opsione të Tjera</span>
                       <div className={`flex-1 h-px ${isDark ? "bg-zinc-800" : "bg-zinc-200"}`}></div>
                    </div>
-                   <button type="button" onClick={loginWithGoogle} className={`w-full py-3 flex items-center justify-center gap-2 font-medium rounded-xl transition-colors border ${
+
+                   <button type="button" onClick={handleAnonymousAuth} className={`w-full py-3 flex items-center justify-center gap-2 font-bold rounded-xl transition-colors bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20`}>
+                      <Cloud className="w-5 h-5" /> Aktivizo Cloud Menjëherë (Fast Sync - Pa Shfletues)
+                   </button>
+
+                   <button type="button" onClick={loginWithGoogle} className={`w-full py-2.5 flex items-center justify-center gap-2 font-medium rounded-xl transition-colors border text-sm ${
                       isDark ? "bg-zinc-950 border-zinc-700 text-zinc-300 hover:bg-zinc-800" : "bg-white border-zinc-300 text-zinc-700 hover:bg-zinc-50"
                    }`}>
-                      Google
+                      Google (Për Shfletues Web / PWA)
                    </button>
+
+                   <p className="text-center text-xs mt-1 text-zinc-500 font-medium bg-zinc-500/10 p-3 rounded-lg leading-relaxed">
+                      💡 <b>Këshillë për APK (Android):</b> Nëse jeni në aplikacionin APK, përdorni <b>Email/Password</b> ose <b>Fast Sync</b> për të qëndruar 100% brenda aplikacionit pa u kaluar në shfletuesin Chrome!
+                   </p>
                    <p className="text-center text-xs mt-3 text-zinc-500 font-medium bg-zinc-500/10 p-3 rounded-lg">
                       {isSignUp ? 'Tashmë i keni dhënë informacionet dhe keni një llogari aktive në Firebase? ' : 'Për të pasur akses në sistemin Cloud (Firebase) fillimisht duhet të regjistroheni për të aktivizuar hapësirën tuaj personale. '}
                       <button type="button" onClick={() => setIsSignUp(!isSignUp)} className="text-accent-500 font-bold hover:underline ml-1">

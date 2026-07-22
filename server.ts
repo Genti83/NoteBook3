@@ -82,7 +82,7 @@ Kthe VETËM JSON të vlefshëm!`;
       for (let attempt = 0; attempt < 4; attempt++) {
         try {
           const response = await ai.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: 'gemini-2.5-flash',
             contents: (() => { const parts: any[] = [{ text: prompt }]; if (image) { const b = image.split(',')[1]; const m = image.split(';')[0].split(':')[1]; parts.push({ inlineData: { data: b, mimeType: m } }); } if (audio) { const b = audio.split(',')[1]; const m = audio.split(';')[0].split(':')[1]; parts.push({ inlineData: { data: b, mimeType: m } }); } return parts; })(),
             config: {
               systemInstruction,
@@ -97,9 +97,9 @@ Kthe VETËM JSON të vlefshëm!`;
           const isRateLimit = err.status === 429 || err.message?.includes('429') || err.message?.includes('quota');
           if (attempt === 0 && isRateLimit) {
             try {
-              // Fallback to gemini-flash-latest
+              // Fallback to gemini-2.5-pro
               const response = await ai.models.generateContent({
-                model: 'gemini-flash-latest',
+                model: 'gemini-2.5-pro',
                 contents: (() => { const parts: any[] = [{ text: prompt }]; if (image) { const b = image.split(',')[1]; const m = image.split(';')[0].split(':')[1]; parts.push({ inlineData: { data: b, mimeType: m } }); } if (audio) { const b = audio.split(',')[1]; const m = audio.split(';')[0].split(':')[1]; parts.push({ inlineData: { data: b, mimeType: m } }); } return parts; })(),
                 config: {
                   systemInstruction,

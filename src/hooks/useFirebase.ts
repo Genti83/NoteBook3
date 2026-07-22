@@ -14,7 +14,7 @@ import {
   signInWithRedirect,
   setPersistence,
   browserLocalPersistence,
-  indexedDBLocalPersistence
+  signInAnonymously
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
 
@@ -149,6 +149,18 @@ export function useFirebase() {
     }
   };
 
+  const loginAnonymously = async () => {
+    try {
+      addDebugLog('Starting Anonymous Cloud Login');
+      const res = await signInAnonymously(auth);
+      addDebugLog('Anonymous Cloud Login Success: ' + res.user.uid);
+      return res.user;
+    } catch(err: any) {
+      addDebugLog('Anonymous Cloud Login Failed: ' + err.message + ' (code: ' + err.code + ')');
+      throw err;
+    }
+  };
+
   const logout = async () => {
     addDebugLog('Logging out');
     await firebaseSignOut(auth);
@@ -160,6 +172,7 @@ export function useFirebase() {
     loginWithGoogle,
     loginWithEmail,
     registerWithEmail,
+    loginAnonymously,
     logout
   };
 }
