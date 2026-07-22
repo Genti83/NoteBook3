@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getDirectoryHandle, saveDirectoryHandle } from '../lib/directoryFS';
-import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen } from 'lucide-react';
+import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen, Terminal, Copy, CheckCheck } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { useFirebase } from '../hooks/useFirebase';
@@ -489,6 +489,24 @@ export function Notepad() {
   const [debugLogsModal, setDebugLogsModal] = useState(false);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   
+  const appendDebugLog = (msg: string) => {
+     const timestamp = new Date().toLocaleTimeString();
+     const logEntry = `[${timestamp}] ${msg}`;
+     console.log(logEntry);
+     setDebugLogs(prev => {
+        const updated = [...prev, logEntry].slice(-300);
+        try {
+           localStorage.setItem('grid_notepad_debug_logs', JSON.stringify(updated));
+           window.dispatchEvent(new Event('debug-log-updated'));
+        } catch(e) {}
+        return updated;
+     });
+  };
+
+  const getActiveUid = () => {
+     return user?.uid || user?.email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com';
+  };
+
   useEffect(() => {
      const updateLogs = () => {
          try {
@@ -626,6 +644,8 @@ export function Notepad() {
     if (!promptText.trim()) return;
     setIsAiThinking(true);
     setAiChatResponse('');
+    appendDebugLog(`🤖 [AI Gemini] Po dërgohet kërkesa: "${promptText.slice(0, 70)}..."`);
+
     try {
        const docsForAi = documents.map(docItem => ({
           ...docItem,
@@ -648,24 +668,31 @@ export function Notepad() {
        let lastErrMessage = '';
 
        for (const ep of endpoints) {
+          appendDebugLog(`📡 [AI Gemini] Po provohet lidhja me endpoint: ${ep}`);
           try {
              response = await fetch(ep, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: payload
              });
-             if (response.ok) break;
+             if (response.ok) {
+                appendDebugLog(`✅ [AI Gemini] Lidhja u krye me sukses (HTTP ${response.status}) te: ${ep}`);
+                break;
+             }
              const errJson = await response.json().catch(() => ({}));
              lastErrMessage = errJson.error || response.statusText;
+             appendDebugLog(`⚠️ [AI Gemini] Status jo-ok (${response.status}) nga ${ep}: ${lastErrMessage}`);
           } catch(e: any) {
              console.warn("AI chat endpoint error:", ep, e);
-             lastErrMessage = e.message || "Bllokim i rrjetit";
+             lastErrMessage = e.message || "Bllokim i rrjetit / CORS";
+             appendDebugLog(`❌ [AI Gemini] Gabim lidhje me ${ep}: ${lastErrMessage}`);
           }
        }
 
        if (response && response.ok) {
           const data = await response.json();
           setAiChatResponse(data.text || "Përgjigjja nga AI Gemini u mor me sukses.");
+          appendDebugLog(`🎉 [AI Gemini] Marrë përgjigja me sukses. Teksti: ${data.text ? data.text.slice(0, 100) : 'Përgjigje pa tekst'}`);
           
           if (data.actions && Array.isArray(data.actions)) {
              data.actions.forEach((act: any) => {
@@ -682,7 +709,13 @@ export function Notepad() {
                          }
                          return d;
                      }));
+                     if (act.documentId === activeDocIdRef.current) {
+                         if (act.newHeaders) setHeaders(act.newHeaders);
+                         if (act.newColumnWidths) setColumnWidths(act.newColumnWidths);
+                         if (act.newRows) setRows(act.newRows);
+                     }
                      showToast("Kolonat dhe rrjeshtat u përditësuan nga AI!");
+                     appendDebugLog(`✏️ [AI Gemini] U përditësuan kolonat dhe rrjeshtat për dokumentin ID: ${act.documentId}`);
                  } else if (act.type === 'UPDATE_DOCUMENT_ROWS' && act.documentId) {
                      setDocuments(prevDocs => prevDocs.map(d => {
                          if (d.id === act.documentId) {
@@ -694,15 +727,23 @@ export function Notepad() {
                          }
                          return d;
                      }));
+                     if (act.documentId === activeDocIdRef.current && act.newRows) {
+                         setRows(act.newRows);
+                     }
                      showToast("Rrjeshtat u përditësuan nga AI Gemini!");
+                     appendDebugLog(`✏️ [AI Gemini] U përditësuan rrjeshtat për dokumentin ID: ${act.documentId}`);
                  }
              });
           }
        } else {
-          setAiChatResponse(`Gabim gjatë komunikimit me AI Gemini: ${lastErrMessage || 'Sistemi nuk mund t\'i përgjigjej kërkesës.'}`);
+          const errMsg = `Gabim gjatë komunikimit me AI Gemini: ${lastErrMessage || 'Sistemi nuk mund t\'i përgjigjej kërkesës.'}`;
+          setAiChatResponse(errMsg);
+          appendDebugLog(`❌ [AI Gemini] ${errMsg}`);
        }
     } catch (err: any) {
-       setAiChatResponse("Gabim i papritur: " + err.message);
+       const errMsg = "Gabim i papritur: " + err.message;
+       setAiChatResponse(errMsg);
+       appendDebugLog(`💥 [AI Gemini] ${errMsg}`);
     }
     setIsAiThinking(false);
     setAiChatInput('');
@@ -755,6 +796,8 @@ export function Notepad() {
    const syncWithGoogleCloud = async (docsToSync?: GridDocument[], silent = false) => {
     const docs = docsToSync || documents;
     const uid = getActiveUid() || 'genti8319@gmail.com';
+    appendDebugLog(`☁️ [Google Cloud Sync] Po ngarkohen ${docs.length} dokumente për përdoruesin: ${uid}`);
+
     const payload = JSON.stringify({
       userId: uid,
       documents: docs,
@@ -772,6 +815,7 @@ export function Notepad() {
 
     let success = false;
     for (const ep of endpoints) {
+      appendDebugLog(`📡 [Google Cloud Sync] Po provohet lidhja me endpoint: ${ep}`);
       try {
         const res = await fetch(ep, {
           method: 'POST',
@@ -780,10 +824,14 @@ export function Notepad() {
         });
         if (res.ok) {
           success = true;
+          appendDebugLog(`✅ [Google Cloud Sync] Ruajtja u krye me sukses në Google Cloud (HTTP ${res.status}) te: ${ep}`);
           break;
+        } else {
+          appendDebugLog(`⚠️ [Google Cloud Sync] Status jo-ok (${res.status}) nga ${ep}`);
         }
-      } catch (e) {
+      } catch (e: any) {
         console.warn("Google Cloud sync error:", ep, e);
+        appendDebugLog(`❌ [Google Cloud Sync] Gabim lidhje me ${ep}: ${e.message}`);
       }
     }
 
@@ -800,6 +848,8 @@ export function Notepad() {
   const loadFromGoogleCloud = async (silent = false) => {
     setIsFetchingCloud(true);
     const uid = getActiveUid() || 'genti8319@gmail.com';
+    appendDebugLog(`☁️ [Google Cloud Load] Po shkarkohen dokumentet nga serveri për: ${uid}`);
+
     const endpoints = [];
     if (Capacitor.isNativePlatform()) {
       endpoints.push(`https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/load?userId=${encodeURIComponent(uid)}`);
@@ -809,17 +859,24 @@ export function Notepad() {
 
     let loadedData: any = null;
     for (const ep of endpoints) {
+      appendDebugLog(`📡 [Google Cloud Load] Po kërkohet nga endpoint: ${ep}`);
       try {
         const res = await fetch(ep);
         if (res.ok) {
           const json = await res.json();
           if (json.documents && json.documents.length > 0) {
             loadedData = json;
+            appendDebugLog(`✅ [Google Cloud Load] U morën ${json.documents.length} dokumente nga Google Cloud server!`);
             break;
+          } else {
+             appendDebugLog(`ℹ️ [Google Cloud Load] Përgjigje me sukses por nuk u gjetën dokumente për ${uid}`);
           }
+        } else {
+           appendDebugLog(`⚠️ [Google Cloud Load] Status jo-ok (${res.status}) nga ${ep}`);
         }
-      } catch (e) {
+      } catch (e: any) {
         console.warn("Google Cloud load error:", ep, e);
+        appendDebugLog(`❌ [Google Cloud Load] Gabim lidhje me ${ep}: ${e.message}`);
       }
     }
 
@@ -2834,23 +2891,71 @@ export function Notepad() {
           </div>
       )}
       
-      {/* DEBUG LOGS MODAL */}
+      {/* DEBUG LOGS / LOGCAT CONSOLE MODAL */}
       {debugLogsModal && (
-          <div className="fixed inset-0 z-[200] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center bg-black/60 p-4 animate-in fade-in">
-             <div className={`max-w-xl w-full p-6 rounded-2xl shadow-2xl border flex flex-col ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`} style={{ maxHeight: '80vh' }}>
-                <div className="flex justify-between items-center mb-4">
-                   <h3 className={`text-lg font-bold ${isDark ? "text-white" : "text-zinc-900"}`}>Sistemi i Log-eve (Problemet e lidhjes)</h3>
+          <div className="fixed inset-0 z-[200] flex items-start pt-8 pb-12 md:items-center overflow-y-auto justify-center bg-black/70 p-4 animate-in fade-in">
+             <div className={`max-w-2xl w-full p-6 rounded-2xl shadow-2xl border flex flex-col ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`} style={{ maxHeight: '85vh' }}>
+                <div className="flex justify-between items-center mb-3">
+                   <h3 className={`text-xl font-bold flex items-center gap-2 ${isDark ? "text-white" : "text-zinc-900"}`}>
+                      <Terminal className="w-6 h-6 text-emerald-500" />
+                      Logcat Console & Diagnostikimi i Sistemit
+                   </h3>
                    <button onClick={() => setDebugLogsModal(false)} className="p-2 bg-transparent text-zinc-500 hover:text-red-500 transition-colors">
                       <X className="w-5 h-5"/>
                    </button>
                 </div>
-                <div className={`flex-1 overflow-y-auto p-3 rounded border text-xs font-mono whitespace-pre-wrap ${isDark ? "bg-zinc-950 border-zinc-800 text-green-400" : "bg-zinc-100 border-zinc-300 text-green-700"}`}>
-                    {debugLogs.length === 0 ? "Nuk ka asnjë problem të regjistruar deri tani." : debugLogs.join('\n')}
-                </div>
-                <div className="mt-4 flex justify-end">
-                    <button onClick={() => { localStorage.removeItem('grid_notepad_debug_logs'); setDebugLogs([]); }} className="px-4 py-2 bg-red-600/10 text-red-500 hover:bg-red-600 hover:text-white rounded-lg text-sm font-bold transition-colors">
-                       Pastro
-                    </button>
+                
+                <p className={`text-xs mb-3 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                   Gjithë historiku i tentativate të sinkronizimit me Google Cloud, AI Gemini API, dhe gabimeve të rrjetit. Mund t'i kopjoni të gjitha me 1 klik.
+                </p>
+
+                <textarea
+                   readOnly
+                   value={debugLogs.length === 0 ? "Nuk ka asnjë log të regjistruar deri tani. Kryeni një aksion ose dërgoni pyetje te AI për të parë historikun." : debugLogs.join('\n')}
+                   onClick={(e) => e.currentTarget.select()}
+                   className={`w-full h-72 p-3.5 rounded-xl border text-xs font-mono resize-none focus:outline-none leading-relaxed ${
+                      isDark ? "bg-zinc-950 border-zinc-800 text-emerald-400" : "bg-zinc-900 border-zinc-700 text-emerald-300"
+                   }`}
+                />
+
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                   <div className="flex flex-wrap items-center gap-2">
+                      <button onClick={() => {
+                         if (debugLogs.length === 0) return showToast("Nuk ka log-e për t'u kopjuar.");
+                         navigator.clipboard.writeText(debugLogs.join('\n'));
+                         showToast("📋 Gjithë log-et u kopjuan në clipboard (Select All TXT)!");
+                      }} className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-md">
+                         <Copy className="w-4 h-4" /> Kopjo Të Gjitha (Select All TXT)
+                      </button>
+
+                      <button onClick={() => {
+                         if (debugLogs.length === 0) return showToast("Nuk ka log-e për t'u shkarkuar.");
+                         const blob = new Blob([debugLogs.join('\n')], { type: 'text/plain;charset=utf-8' });
+                         const url = URL.createObjectURL(blob);
+                         const a = document.createElement('a');
+                         a.href = url;
+                         a.download = `logcat_debug_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.txt`;
+                         a.click();
+                         URL.revokeObjectURL(url);
+                         showToast("💾 Skedari logcat .txt u shkarkua me sukses!");
+                      }} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-md">
+                         <Download className="w-4 h-4" /> Shkarko TXT
+                      </button>
+
+                      <button onClick={() => {
+                         askAi("Përshëndetje AI Gemini! Konfirmo nëse je online dhe funksional.");
+                      }} className="px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-md">
+                         <Sparkles className="w-4 h-4" /> Testo AI Gemini
+                      </button>
+                   </div>
+
+                   <button onClick={() => { 
+                      localStorage.removeItem('grid_notepad_debug_logs'); 
+                      setDebugLogs([]); 
+                      showToast("Log-et u pastruan!");
+                   }} className="px-3 py-2 bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white rounded-xl text-xs font-bold transition-colors">
+                      Pastro
+                   </button>
                 </div>
              </div>
           </div>

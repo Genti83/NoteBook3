@@ -46,7 +46,7 @@ async function startServer() {
   // Google Cloud Storage API Endpoints
   app.post('/api/cloud/sync', (req, res) => {
     try {
-      const { userId, documents, activeDocId } = req.body;
+      const { userId, documents, activeDocId, blueText, secretList, pin } = req.body;
       const key = (userId || 'default_user').trim().toLowerCase();
       const db = readCloudDb();
       
@@ -54,6 +54,9 @@ async function startServer() {
       db[key] = {
         documents: documents || [],
         activeDocId: activeDocId || null,
+        blueText: blueText !== undefined ? blueText : db[key]?.blueText,
+        secretList: secretList !== undefined ? secretList : db[key]?.secretList,
+        pin: pin !== undefined ? pin : db[key]?.pin,
         lastUpdated
       };
       
@@ -92,6 +95,9 @@ async function startServer() {
         success: true,
         documents: record.documents,
         activeDocId: record.activeDocId,
+        blueText: record.blueText,
+        secretList: record.secretList,
+        pin: record.pin,
         lastUpdated: record.lastUpdated
       });
     } catch (err: any) {
