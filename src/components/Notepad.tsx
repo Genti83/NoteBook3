@@ -940,7 +940,7 @@ export function Notepad() {
           let msg = "Gabim: " + err.message;
           if (err.code === 'auth/email-already-in-use') {
              setIsSignUp(false);
-             showToast("Kjo llogari ekziston tashmë! Provo të hysh (Login) ose përdor Google.");
+             alert("Kjo llogari ekziston tashmë! Paneli kaloi automatikisht tek 'Login' (Hyrje). Ju lutem vendosni fjalëkalimin tuaj për t'u kyçur.");
              return;
           }
           if (err.code === 'auth/weak-password') msg = "Fjalëkalimi duhet të ketë të paktën 6 karaktere.";
@@ -949,7 +949,9 @@ export function Notepad() {
              msg = "Kredenciale të gabuara! Nëse jeni regjistruar me Google, klikoni butonin Google.";
           }
           if (err.code === 'auth/operation-not-allowed') {
-             msg = "Email login is disabled in Firebase! Ju lutem aktivizoni 'Email/Password' tek Firebase Console -> Authentication -> Sign-in method.";
+             msg = "Kujdes: Hyrja me Email/Password nuk është e aktivizuar!\n\nJu lutem shkoni tek Firebase Console:\n1. Authentication\n2. Sign-in method\n3. Aktivizoni 'Email/Password'";
+             alert(msg);
+             return;
           }
           if (err.code === 'auth/network-request-failed') {
              msg = "Nuk ka lidhje interneti ose u bllokua kërkesa! Sigurohuni që pajisja ka akses.";
@@ -981,9 +983,9 @@ export function Notepad() {
          if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
              showToast("Dritarja u mbyll! Provoni përsëri ose përdorni hyrjen me Email/Password.");
          } else if (err.code === 'auth/operation-not-allowed') {
-             showToast("Hyrja me Google është e çaktivizuar në server! Provoni Email.");
+             alert("Kujdes: Hyrja me Google nuk është e aktivizuar në Firebase!\n\nJu lutem shkoni tek Firebase Console -> Authentication -> Sign-in method dhe aktivizoni 'Google'.");
          } else {
-             showToast("Gabim gjatë hyrjes me Google: " + err.message);
+             alert("Gabim gjatë hyrjes me Google:\n" + err.message + "\n\nNëse jeni në APK/Android dhe Google Sign-in nuk funksionon, kyçuni me Email/Password.");
          }
       }
   };

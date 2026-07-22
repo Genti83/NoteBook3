@@ -88,11 +88,18 @@ export function useFirebase() {
                  throw new Error("No idToken returned from Google");
              }
           } catch(nativeErr: any) {
-             addDebugLog('Native plugin failed (' + nativeErr.message + '), falling back to web flow...');
+             addDebugLog('Native plugin failed (' + nativeErr.message + '), falling back to web popup...');
              const provider = new GoogleAuthProvider();
              provider.setCustomParameters({ prompt: 'select_account' });
-             await signInWithRedirect(auth, provider);
-             return null;
+             try {
+                const res = await signInWithPopup(auth, provider);
+                addDebugLog('Fallback popup login success: ' + res.user.email);
+                return res.user;
+             } catch (popupErr: any) {
+                addDebugLog('Fallback popup failed, trying redirect: ' + popupErr.message);
+                await signInWithRedirect(auth, provider);
+                return null;
+             }
           }
       } else {
           addDebugLog('Starting Web Google Login (Redirect)');
