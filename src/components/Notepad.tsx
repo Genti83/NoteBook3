@@ -366,7 +366,7 @@ export function Notepad() {
   const [appLockInput, setAppLockInput] = useState('');
 
   const [authModal, setAuthModal] = useState(false);
-  const { user, loginWithGoogle: hookGoogleLogin, loginWithEmail: hookEmailLogin, registerWithEmail: hookEmailRegister, logout: hookLogout } = useFirebase();
+  const { user, loading, loginWithGoogle: hookGoogleLogin, loginWithEmail: hookEmailLogin, registerWithEmail: hookEmailRegister, logout: hookLogout } = useFirebase();
   const [email, setEmail] = useState(() => localStorage.getItem('grid_notepad_saved_email') || '');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
@@ -637,7 +637,9 @@ export function Notepad() {
        }));
        
        // Use production URL if running on native (Capacitor) because the local server isn't running there.
-       const baseUrl = Capacitor.isNativePlatform() ? 'https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app' : '';
+       // Kemi vendosur URL e Dev per te lejuar testimin e menjehershem ne APK.
+       // Pasi te besh Deploy/Share nga AI Studio, mund ta ndryshosh tek URL pre.
+       const baseUrl = Capacitor.isNativePlatform() ? 'https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app' : '';
        const response = await fetch(baseUrl + '/api/ai/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -685,8 +687,8 @@ export function Notepad() {
              setAiChatResponse(`Gabim HTTP: ${response.status} ${response.statusText}`);
           }
        }
-    } catch (err) {
-       setAiChatResponse("Gabim lidhjeje me serverin.");
+    } catch (err: any) {
+       setAiChatResponse("Gabim lidhjeje me serverin (Network/CORS): " + err.message + ". Sigurohuni që pajisja ka internet dhe që keni bërë 'Share' aplikacionin në AI Studio që të përditësohet serveri.");
     }
     setIsAiThinking(false);
     setAiChatInput('');
@@ -916,6 +918,10 @@ export function Notepad() {
           } else {
               await hookEmailLogin(email, password);
               showToast("Hyrje e suksesshme! Sinkronizimi Cloud u aktivizua.");
+              // Auto-restore if local docs are empty (e.g. new phone)
+              if (documents.length === 0 || (documents.length === 1 && documents[0].rows.length === 0)) {
+                  setTimeout(() => handleFullCloudRestore(), 1000);
+              }
           }
           
           localStorage.setItem('grid_notepad_saved_email', email);
@@ -930,6 +936,7 @@ export function Notepad() {
           
           setTimeout(() => forceCloudBackup(), 1500);
       } catch (err: any) {
+          console.error("Email auth err:", err);
           let msg = "Gabim: " + err.message;
           if (err.code === 'auth/email-already-in-use') {
              setIsSignUp(false);
@@ -942,7 +949,10 @@ export function Notepad() {
              msg = "Kredenciale të gabuara! Nëse jeni regjistruar me Google, klikoni butonin Google.";
           }
           if (err.code === 'auth/operation-not-allowed') {
-             msg = "Ky opsion nuk është i lejuar. Për ta rregulluar: Shko tek Firebase Console -> Authentication -> Sign-in method -> Aktivizo 'Email/Password'.";
+             msg = "Email login is disabled in Firebase! Ju lutem aktivizoni 'Email/Password' tek Firebase Console -> Authentication -> Sign-in method.";
+          }
+          if (err.code === 'auth/network-request-failed') {
+             msg = "Nuk ka lidhje interneti ose u bllokua kërkesa! Sigurohuni që pajisja ka akses.";
           }
           
           showToast(msg);
@@ -951,16 +961,27 @@ export function Notepad() {
 
   const loginWithGoogle = async () => {
       try {
-         await hookGoogleLogin();
+         const googleUser = await hookGoogleLogin();
+         if (googleUser === null) {
+            // This means a redirect was started! So we wait.
+            showToast("Po ju ridrejtojmë tek Google për hyrje...");
+            return;
+         }
          localStorage.setItem('grid_cloud_sync_freq', '5000');
          setCloudSyncFrequency(5000);
          localStorage.removeItem('grid_notepad_custom_uid'); 
          setAuthModal(false);
          showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua.");
-         setTimeout(() => forceCloudBackup(), 1500);
+         if (documents.length === 0 || (documents.length === 1 && documents[0].rows.length === 0)) {
+            setTimeout(() => handleFullCloudRestore(), 1000);
+         } else {
+            setTimeout(() => forceCloudBackup(), 1500);
+         }
       } catch (err: any) {
          if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
-             showToast("Dritarja e hyrjes u mbyll ose u bllokua. Nëse jeni në aplikacion (APK), ju lutem aktivizoni Email/Password në Firebase sepse Google Sign-In kërkon shfletues.");
+             showToast("Dritarja u mbyll! Provoni përsëri ose përdorni hyrjen me Email/Password.");
+         } else if (err.code === 'auth/operation-not-allowed') {
+             showToast("Hyrja me Google është e çaktivizuar në server! Provoni Email.");
          } else {
              showToast("Gabim gjatë hyrjes me Google: " + err.message);
          }
@@ -1147,6 +1168,20 @@ export function Notepad() {
        }
     }
   }, []);
+
+  // Auto-restore docs if empty on login (e.g. fresh phone install)
+  useEffect(() => {
+    if (user && !loading) {
+       const docs = JSON.parse(localStorage.getItem('grid_notepad_documents_v2') || '[]');
+       if (docs.length === 0 || (docs.length === 1 && docs[0].rows.length === 0)) {
+           // We are empty and logged in. Wait for online status.
+           if (navigator.onLine) {
+               console.log("Auto-restoring from cloud since local docs are empty...");
+               handleFullCloudRestore();
+           }
+       }
+    }
+  }, [user, loading]);
 
   useEffect(() => {
     const root = document.documentElement;
