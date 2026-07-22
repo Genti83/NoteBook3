@@ -636,7 +636,9 @@ export function Notepad() {
           })
        }));
        
-       const response = await fetch('/api/ai/chat', {
+       // Use production URL if running on native (Capacitor) because the local server isn't running there.
+       const baseUrl = Capacitor.isNativePlatform() ? 'https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app' : '';
+       const response = await fetch(baseUrl + '/api/ai/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt: promptText, documents: docsForAi, activeDocId, image: aiChatImage, audio: aiChatAudio })
@@ -1478,19 +1480,41 @@ export function Notepad() {
                   const base64data = reader.result?.toString().split(',')[1];
                   if (base64data) {
                       try {
+                          // Request permission first to ensure we can write to memory
+                          try {
+                             await Filesystem.requestPermissions();
+                          } catch(permErr) {}
+
                           // Get folder name from state/localStorage
                           const manualFolder = localStorage.getItem('grid_mock_folder') || folderName;
                           const sanitizedFolder = manualFolder ? manualFolder.replace(/[^a-zA-Z0-9_\s-]/g, '').trim() : '';
                           const fullPath = sanitizedFolder ? `${sanitizedFolder}/${filename}` : filename;
                           
-                          await Filesystem.writeFile({
-                              path: fullPath,
+                          // Write to a cache directory first so we can share it if needed
+                          const writeResult = await Filesystem.writeFile({
+                              path: filename,
                               data: base64data,
-                              directory: Directory.Documents,
+                              directory: Directory.Cache,
                               recursive: true
                           });
                           
-                          showToast(t(`Skedari u ruajt me sukses në Documents/${fullPath}`, `Saved to Documents/${fullPath}`));
+                          if (downloadMethod === 'share' || downloadMethod === 'picker') {
+                             await Share.share({
+                                 title: shareTitle,
+                                 url: writeResult.uri,
+                                 dialogTitle: 'Zgjidh ku do të ruash dokumentin (Save to...)'
+                             });
+                             showToast("Hapëm menunë për të zgjedhur dosjen!");
+                          } else {
+                             // Save to documents by default
+                             await Filesystem.writeFile({
+                                 path: fullPath,
+                                 data: base64data,
+                                 directory: Directory.Documents,
+                                 recursive: true
+                             });
+                             showToast(t(`Skedari u ruajt me sukses në Documents/${fullPath}`, `Saved to Documents/${fullPath}`));
+                          }
                       } catch (e: any) {
                           console.error("Capacitor save error:", e);
                           showToast("Gabim gjatë ruajtjes: " + (e.message || "E panjohur"));

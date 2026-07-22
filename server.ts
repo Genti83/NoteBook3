@@ -63,7 +63,7 @@ Kthe VETËM JSON të vlefshëm!`;
       for (let attempt = 0; attempt < 4; attempt++) {
         try {
           const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-2.0-flash',
             contents: (() => { const parts: any[] = [{ text: prompt }]; if (image) { const b = image.split(',')[1]; const m = image.split(';')[0].split(':')[1]; parts.push({ inlineData: { data: b, mimeType: m } }); } if (audio) { const b = audio.split(',')[1]; const m = audio.split(';')[0].split(':')[1]; parts.push({ inlineData: { data: b, mimeType: m } }); } return parts; })(),
             config: {
               systemInstruction,

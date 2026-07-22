@@ -1,25 +1,39 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/components/Notepad.tsx', 'utf8');
+let code = fs.readFileSync('src/hooks/useFirebase.ts', 'utf8');
 
-// Add getRedirectResult logic to useEffect where we have authStateChanged
-const targetEffect = `  useEffect(() => {
-     if (typeof window !== 'undefined') {
-        const storedTheme = localStorage.getItem('grid_notepad_theme');`;
+const targetGoogleLogin = `      } else {
+          addDebugLog('Starting Web Google Login (Popup)');
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          
+          // Vetem Popup, pa Redirect fallback pasi shkakton bllokim ne handler
+          const res = await signInWithPopup(auth, provider);
+          addDebugLog('Popup login success: ' + res.user.email);
+          return res.user;
+      }`;
 
-const replacementEffect = `  useEffect(() => {
-     if (typeof window !== 'undefined') {
-        const storedTheme = localStorage.getItem('grid_notepad_theme');
-        
-        getRedirectResult(auth).then((result) => {
-            if (result && result.user) {
-                localStorage.setItem('grid_cloud_sync_freq', '5000');
-                setCloudSyncFrequency(5000);
-                localStorage.removeItem('grid_notepad_custom_uid');
-                showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
-                setTimeout(() => forceCloudBackup(), 1500);
-            }
-        }).catch(console.error);`;
+const replacementGoogleLogin = `      } else {
+          addDebugLog('Starting Web Google Login (Redirect)');
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          
+          try {
+             // We use popup first, but if it fails (like auth/popup-blocked), we use redirect
+             const res = await signInWithPopup(auth, provider);
+             addDebugLog('Popup login success: ' + res.user.email);
+             return res.user;
+          } catch (popupErr: any) {
+             if (popupErr.code === 'auth/popup-blocked' || popupErr.code === 'auth/popup-closed-by-user' || popupErr.message.includes('popup')) {
+                 addDebugLog('Popup failed, trying redirect...');
+                 await signInWithRedirect(auth, provider);
+                 return null;
+             }
+             throw popupErr;
+          }
+      }`;
 
-code = code.replace(targetEffect, replacementEffect);
-
-fs.writeFileSync('src/components/Notepad.tsx', code);
+if (code.includes(targetGoogleLogin)) {
+    code = code.replace(targetGoogleLogin, replacementGoogleLogin);
+    fs.writeFileSync('src/hooks/useFirebase.ts', code);
+    console.log("Google Login fallback fixed!");
+}

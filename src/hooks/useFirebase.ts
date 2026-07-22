@@ -1,3 +1,5 @@
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
+import { signInWithCredential } from 'firebase/auth';
 import { useState, useEffect } from 'react';
 import { auth, db } from '../lib/firebase';
 import { 
@@ -73,19 +75,35 @@ export function useFirebase() {
 
   const loginWithGoogle = async () => {
     try {
-      addDebugLog('Starting Google Login (Popup)');
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      
-      // Provon popup, nese deshton (p.sh. bllokohet), provon redirect
-      try {
-          const res = await signInWithPopup(auth, provider);
-          addDebugLog('Popup login success: ' + res.user.email);
-          return res.user;
-      } catch (popupErr: any) {
-          addDebugLog('Popup blocked or failed: ' + popupErr.message + '. Falling back to redirect.');
-          await signInWithRedirect(auth, provider);
-          return null; // redirect will reload page
+      if (Capacitor.isNativePlatform()) {
+          addDebugLog('Starting Native Google Login');
+          const result = await FirebaseAuthentication.signInWithGoogle();
+          if (result.credential?.idToken) {
+              const credential = GoogleAuthProvider.credential(result.credential.idToken);
+              const res = await signInWithCredential(auth, credential);
+              addDebugLog('Native login success: ' + res.user.email);
+              return res.user;
+          } else {
+              throw new Error("No idToken returned from Google");
+          }
+      } else {
+          addDebugLog('Starting Web Google Login (Redirect)');
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          
+          try {
+             // We use popup first, but if it fails (like auth/popup-blocked), we use redirect
+             const res = await signInWithPopup(auth, provider);
+             addDebugLog('Popup login success: ' + res.user.email);
+             return res.user;
+          } catch (popupErr: any) {
+             if (popupErr.code === 'auth/popup-blocked' || popupErr.code === 'auth/popup-closed-by-user' || popupErr.message.includes('popup')) {
+                 addDebugLog('Popup failed, trying redirect...');
+                 await signInWithRedirect(auth, provider);
+                 return null;
+             }
+             throw popupErr;
+          }
       }
     } catch(err: any) {
       addDebugLog('Google Login Exception: ' + err.message);
