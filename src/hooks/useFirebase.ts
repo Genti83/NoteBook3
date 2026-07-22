@@ -96,9 +96,8 @@ export function useFirebase() {
                 addDebugLog('Fallback popup login success: ' + res.user.email);
                 return res.user;
              } catch (popupErr: any) {
-                addDebugLog('Fallback popup failed, trying redirect: ' + popupErr.message);
-                await signInWithRedirect(auth, provider);
-                return null;
+                addDebugLog('Fallback popup failed in native app: ' + popupErr.message);
+                throw new Error("Nëse jeni në APK (Android), hyrja me Google kërkon shfletuesin Chrome. Për të qëndruar brenda aplikacionit APK, përdorni hyrjen me Email/Password!");
              }
           }
       } else {

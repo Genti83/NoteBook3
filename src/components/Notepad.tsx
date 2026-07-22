@@ -939,9 +939,28 @@ export function Notepad() {
           console.error("Email auth err:", err);
           let msg = "Gabim: " + err.message;
           if (err.code === 'auth/email-already-in-use') {
-             setIsSignUp(false);
-             alert("Kjo llogari ekziston tashmë! Paneli kaloi automatikisht tek 'Login' (Hyrje). Ju lutem vendosni fjalëkalimin tuaj për t'u kyçur.");
-             return;
+             try {
+                 showToast("Kjo llogari ekziston! Po kyçeni automatikisht...");
+                 await hookEmailLogin(email, password);
+                 showToast("Hyrje e suksesshme me llogarinë tuaj!");
+                 localStorage.setItem('grid_notepad_saved_email', email);
+                 localStorage.setItem('grid_notepad_saved_pwd', password);
+                 localStorage.removeItem('grid_notepad_custom_uid'); 
+                 localStorage.setItem('grid_cloud_sync_freq', '5000');
+                 setCloudSyncFrequency(5000);
+                 setAuthModal(false);
+                 setPassword('');
+                 if (documents.length === 0 || (documents.length === 1 && documents[0].rows.length === 0)) {
+                    setTimeout(() => handleFullCloudRestore(), 1000);
+                 } else {
+                    setTimeout(() => forceCloudBackup(), 1500);
+                 }
+                 return;
+             } catch (loginErr: any) {
+                 setIsSignUp(false);
+                 alert("Kjo llogari ekziston tashmë! Paneli kaloi automatikisht tek 'Login' (Hyrje). Ju lutem vendosni fjalëkalimin tuaj për t'u kyçur.");
+                 return;
+             }
           }
           if (err.code === 'auth/weak-password') msg = "Fjalëkalimi duhet të ketë të paktën 6 karaktere.";
           if (err.code === 'auth/invalid-email') msg = "Formati i emailit është i pasaktë.";
