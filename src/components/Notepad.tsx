@@ -604,11 +604,14 @@ export function Notepad() {
 
      const relativePath = path;
      const fullCurrentOrigin = currentOrigin ? `${currentOrigin}${path}` : '';
-     const devOrigin = `https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app${path}`;
-     const preOrigin = `https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app${path}`;
 
-     const endpoints = [relativePath, fullCurrentOrigin, devOrigin, preOrigin].filter(Boolean);
-     return Array.from(new Set(endpoints));
+     if (Capacitor.isNativePlatform()) {
+        const devOrigin = `https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app${path}`;
+        const preOrigin = `https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app${path}`;
+        return Array.from(new Set([relativePath, fullCurrentOrigin, devOrigin, preOrigin].filter(Boolean)));
+     }
+
+     return Array.from(new Set([relativePath, fullCurrentOrigin].filter(Boolean)));
   };
 
   useEffect(() => {
@@ -784,13 +787,14 @@ export function Notepad() {
                 appendDebugLog(`⚠️ [AI Gemini] Endpoint ${ep} ktheu HTML (SPA Fallback). Po provohet tjetri...`);
              } else {
                 const errJson = await res.json().catch(() => ({}));
-                lastErrMessage = errJson.error || res.statusText;
+                lastErrMessage = errJson.error || res.statusText || `HTTP ${res.status}`;
                 appendDebugLog(`⚠️ [AI Gemini] Status jo-ok (${res.status}) nga ${ep}: ${lastErrMessage}`);
+                if (contentType.includes('application/json')) break;
              }
           } catch(e: any) {
              console.warn("AI chat endpoint error:", ep, e);
-             lastErrMessage = e.message || "Bllokim i rrjetit / CORS";
-             appendDebugLog(`❌ [AI Gemini] Gabim lidhje me ${ep}: ${lastErrMessage}`);
+             if (!lastErrMessage) lastErrMessage = e.message || "Bllokim i rrjetit / CORS";
+             appendDebugLog(`❌ [AI Gemini] Gabim lidhje me ${ep}: ${e.message || 'Gabim'}`);
           }
        }
 
