@@ -801,6 +801,7 @@ export function Notepad() {
        }
 
        let data: any = null;
+       let clientErrorMsg = '';
 
        if (response && response.ok) {
           data = await response.json();
@@ -869,8 +870,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 }
              };
 
-             const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro'];
-             let clientErrorMsg = '';
+             const candidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
 
              // First try official @google/genai Client SDK
              try {
@@ -960,7 +960,13 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
           }
 
           if (!data) {
-             throw new Error(lastErrMessage || "Nuk u arrit lidhja me serverin e AI Gemini dhe nuk keni vendosur Gemini API Key personale.");
+             if (clientErrorMsg) {
+                throw new Error(`Gabim nga Google Gemini API: ${clientErrorMsg}`);
+             } else if (!activeApiKey) {
+                throw new Error("Për të përdorur AI Gemini në APK, ju lutemi vendosni Gemini API Key te cilësimet e AI Gemini me ikonën ⚙️.");
+             } else {
+                throw new Error(lastErrMessage || "Nuk u arrit lidhja me AI Gemini. Ju lutem kontrolloni lidhjen dhe çelësin API.");
+             }
           }
        }
 

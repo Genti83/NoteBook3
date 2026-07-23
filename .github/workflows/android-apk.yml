@@ -5,7 +5,12 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch: # Lejon nisjen manuale nga GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      gemini_api_key:
+        description: 'Gemini API Key (Opsionale: nëse nuk është vendosur te Repository Secrets)'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -27,8 +32,8 @@ jobs:
 
       - name: Build Web App
         env:
-          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY || secrets.GEMINI_API_KEY || vars.VITE_GEMINI_API_KEY || '' }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.VITE_GEMINI_API_KEY || vars.GEMINI_API_KEY || '' }}
+          VITE_GEMINI_API_KEY: ${{ inputs.gemini_api_key || secrets.VITE_GEMINI_API_KEY || secrets.GEMINI_API_KEY || vars.VITE_GEMINI_API_KEY || '' }}
+          GEMINI_API_KEY: ${{ inputs.gemini_api_key || secrets.GEMINI_API_KEY || secrets.VITE_GEMINI_API_KEY || vars.GEMINI_API_KEY || '' }}
         run: npm run build
 
       - name: Add Android Platform
