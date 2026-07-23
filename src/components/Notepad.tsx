@@ -804,22 +804,13 @@ export function Notepad() {
        if (response && response.ok) {
           data = await response.json();
        } else {
-          appendDebugLog(`🔄 [AI Gemini] Server-i nuk u përgjigj ose ktheu HTML. Po provohet lidhja direkte nga pajisja (Client-Side Direct Fallback)...`);
-          const clientKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || localStorage.getItem('grid_notepad_gemini_key') || '';
-          
-          let activeApiKey = clientKey;
-          if (!activeApiKey) {
-             const userKey = prompt("⚠️ Nuk mund të lidhemi me serverin e AI (APK/Offline). Ju lutem vendosni një Gemini API Key për të vazhduar:");
-             if (userKey && userKey.trim()) {
-                activeApiKey = userKey.trim();
-                localStorage.setItem('grid_notepad_gemini_key', activeApiKey);
-             } else {
-                throw new Error("Mungon Gemini API Key për përdorim në APK/Offline.");
-             }
-          }
-
-          const ai = new GoogleGenAI({ apiKey: activeApiKey });
-          const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË.
+          // If a custom API Key is saved in localStorage, try direct client fallback
+          const userSavedKey = localStorage.getItem('grid_notepad_gemini_key') || '';
+          if (userSavedKey) {
+             appendDebugLog(`🔄 [AI Gemini] Server-i nuk u përgjigj. Po provohet lidhja direkte me Gemini API Key personale...`);
+             try {
+                const ai = new GoogleGenAI({ apiKey: userSavedKey });
+                const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË.
 Këtu janë të dhënat e dokumenteve aktualë në formatin JSON:
 ${JSON.stringify(docsForAi, null, 2)}
 
@@ -828,72 +819,64 @@ Dokumenti aktual aktiv që përdoruesi po shikon është me ID: "${activeDocId}"
 TI GJITHMONË DUHET TË KTHESH PËRGJIGJEN TËNDE NË FORMATIN JSON SI MË POSHTË:
 {
   "text": "Teksti i përgjigjes tënde për përdoruesin dhe/ose raporti i llogaritjeve",
-  "actions": [
-    {
-       "type": "PROPOSE_COLUMNS_CHANGE",
-       "documentId": "id_e_dokumentit_qe_po_ndryshon",
-       "newHeaders": ["Data", "Emri", "Sasia (kg)", "Cmimi", "Vlera"],
-       "newColumnWidths": [120, 200, 100, 100, 150],
-       "newRows": []
-    },
-    {
-       "type": "UPDATE_DOCUMENT_ROWS",
-       "documentId": "id_e_dokumentit_qe_po_ndryshon",
-       "newRows": []
-    }
-  ]
+  "actions": []
 }
 Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
-          const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-          let clientError: any = null;
+                const candidateModels = ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+                let clientError: any = null;
 
-          for (const modelName of candidateModels) {
-             try {
-                appendDebugLog(`📡 [AI Gemini Direct] Po provojmë modelin: ${modelName}`);
-                const parts: any[] = [{ text: promptText || 'Analizo bllokun mun' }]; 
-                if (aiChatImage) { 
-                  const b = aiChatImage.split(',')[1]; 
-                  const m = aiChatImage.split(';')[0].split(':')[1]; 
-                  parts.push({ inlineData: { data: b, mimeType: m } }); 
-                } 
-                if (aiChatAudio) { 
-                  const b = aiChatAudio.split(',')[1]; 
-                  const m = aiChatAudio.split(';')[0].split(':')[1]; 
-                  parts.push({ inlineData: { data: b, mimeType: m } }); 
-                } 
+                for (const modelName of candidateModels) {
+                   try {
+                      appendDebugLog(`📡 [AI Gemini Direct] Po provojmë modelin: ${modelName}`);
+                      const parts: any[] = [{ text: promptText || 'Analizo bllokun mun' }]; 
+                      if (aiChatImage) { 
+                        const b = aiChatImage.split(',')[1]; 
+                        const m = aiChatImage.split(';')[0].split(':')[1]; 
+                        parts.push({ inlineData: { data: b, mimeType: m } }); 
+                      } 
+                      if (aiChatAudio) { 
+                        const b = aiChatAudio.split(',')[1]; 
+                        const m = aiChatAudio.split(';')[0].split(':')[1]; 
+                        parts.push({ inlineData: { data: b, mimeType: m } }); 
+                      } 
 
-                const resGen = await ai.models.generateContent({
-                   model: modelName,
-                   contents: parts,
-                   config: {
-                      systemInstruction,
-                      temperature: 0.2,
-                      responseMimeType: 'application/json'
+                      const resGen = await ai.models.generateContent({
+                         model: modelName,
+                         contents: parts,
+                         config: {
+                            systemInstruction,
+                            temperature: 0.2,
+                            responseMimeType: 'application/json'
+                         }
+                      });
+
+                      let rawText = resGen.text || '{}';
+                      rawText = rawText.trim();
+                      if (rawText.startsWith('```')) {
+                        rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/```$/i, '').trim();
+                      }
+
+                      try {
+                        data = JSON.parse(rawText);
+                      } catch(pe) {
+                        data = { text: resGen.text || 'Analiza u krye me sukses.' };
+                      }
+                      appendDebugLog(`✅ [AI Gemini Direct] Sukses me modelin: ${modelName}`);
+                      break;
+                   } catch(e: any) {
+                      console.warn(`Direct Gemini model ${modelName} failed:`, e);
+                      clientError = e;
                    }
-                });
-
-                let rawText = resGen.text || '{}';
-                rawText = rawText.trim();
-                if (rawText.startsWith('```')) {
-                  rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/```$/i, '').trim();
                 }
-
-                try {
-                  data = JSON.parse(rawText);
-                } catch(pe) {
-                  data = { text: resGen.text || 'Analiza u krye me sukses.' };
-                }
-                appendDebugLog(`✅ [AI Gemini Direct] Sukses me modelin: ${modelName}`);
-                break;
-             } catch(e: any) {
-                console.warn(`Direct Gemini model ${modelName} failed:`, e);
-                clientError = e;
+                if (!data && clientError) throw clientError;
+             } catch(directErr: any) {
+                console.error("Direct Gemini fallback error:", directErr);
              }
           }
 
           if (!data) {
-             throw clientError || new Error("Asnjë nga modelet e Gemini nuk u përgjigj në lidhjen direkte.");
+             throw new Error(lastErrMessage || "Nuk u arrit lidhja me serverin e AI Gemini.");
           }
        }
 
