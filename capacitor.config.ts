@@ -5,7 +5,6 @@ const config: CapacitorConfig = {
   appName: 'NoteBook3',
   webDir: 'dist',
   server: {
-    hostname: 'ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app',
     androidScheme: 'https'
   }
 };
