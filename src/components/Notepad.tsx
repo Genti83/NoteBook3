@@ -657,11 +657,13 @@ export function Notepad() {
        
        const payload = JSON.stringify({ prompt: promptText, documents: docsForAi, activeDocId, image: aiChatImage, audio: aiChatAudio });
        
-       const endpoints: string[] = ['/api/ai/chat'];
-       if (Capacitor.isNativePlatform()) {
-          endpoints.push('https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat');
-          endpoints.push('https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat');
-       }
+       const endpoints: string[] = Capacitor.isNativePlatform()
+          ? [
+             'https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat',
+             'https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat',
+             '/api/ai/chat'
+            ]
+          : ['/api/ai/chat'];
 
        let response: Response | null = null;
        let lastErrMessage = '';
@@ -811,11 +813,13 @@ export function Notepad() {
       pin: localStorage.getItem('grid_notepad_pin') || null
     });
 
-    const endpoints = ['/api/cloud/sync'];
-    if (Capacitor.isNativePlatform()) {
-      endpoints.push('https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/sync');
-      endpoints.push('https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/sync');
-    }
+    const endpoints = Capacitor.isNativePlatform()
+      ? [
+          'https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/sync',
+          'https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/sync',
+          '/api/cloud/sync'
+        ]
+      : ['/api/cloud/sync'];
 
     let success = false;
     for (const ep of endpoints) {
@@ -857,11 +861,13 @@ export function Notepad() {
     const uid = getActiveUid() || 'genti8319@gmail.com';
     appendDebugLog(`☁️ [Google Cloud Load] Po shkarkohen dokumentet nga serveri për: ${uid}`);
 
-    const endpoints = [`/api/cloud/load?userId=${encodeURIComponent(uid)}`];
-    if (Capacitor.isNativePlatform()) {
-      endpoints.push(`https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/load?userId=${encodeURIComponent(uid)}`);
-      endpoints.push(`https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/load?userId=${encodeURIComponent(uid)}`);
-    }
+    const endpoints = Capacitor.isNativePlatform()
+      ? [
+          `https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/load?userId=${encodeURIComponent(uid)}`,
+          `https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/load?userId=${encodeURIComponent(uid)}`,
+          `/api/cloud/load?userId=${encodeURIComponent(uid)}`
+        ]
+      : [`/api/cloud/load?userId=${encodeURIComponent(uid)}`];
 
     let loadedData: any = null;
     for (const ep of endpoints) {
@@ -2828,74 +2834,86 @@ export function Notepad() {
           </div>
       )}
 
-      {/* AUTH MODAL */}
+      {/* GOOGLE CLOUD ACCOUNT MODAL */}
       {authModal && (
           <div className="fixed inset-0 z-[100] flex items-start pt-12 pb-[30vh] md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
              <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
-                <div className="flex justify-between items-center mb-6">
-                   <h3 className={`text-xl font-bold ${textColor}`}>
-                      {isSignUp ? 'Krijo Llogari' : 'Hyr në Llogari'}
+                <div className="flex justify-between items-center mb-5">
+                   <h3 className={`text-xl font-bold flex items-center gap-2.5 ${textColor}`}>
+                      <Cloud className="w-6 h-6 text-emerald-500 animate-pulse" /> Llogaria Google Cloud Online
                    </h3>
                    <button onClick={() => setAuthModal(false)} className="p-2 bg-transparent text-zinc-500 hover:text-red-500 transition-colors">
                       <X className="w-5 h-5"/>
                    </button>
                 </div>
 
-                <form onSubmit={handleEmailAuth} className="flex flex-col gap-4">
-                   <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="E-mail adresa"
-                      required
-                      className={`w-full px-4 py-3 rounded-xl border outline-none transition-colors ${
-                          isDark ? "bg-zinc-950 border-zinc-700 text-white focus:border-accent-500" : "bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-accent-500"
-                      }`}
-                   />
-                   <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder={isSignUp ? "Fjalëkalimi (min. 6 karaktere)" : "Fjalëkalimi"}
-                      minLength={6}
-                      required
-                      className={`w-full px-4 py-3 rounded-xl border outline-none transition-colors ${
-                          isDark ? "bg-zinc-950 border-zinc-700 text-white focus:border-accent-500" : "bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-accent-500"
-                      }`}
-                   />
-                   <button type="submit" className="w-full py-3 bg-accent-600 hover:bg-accent-500 text-white font-medium rounded-xl transition-colors shadow-lg">
-                      {isSignUp ? 'Krijo Llogari me Email' : 'Hyr me Email'}
-                   </button>
-                   
-                   <div className="flex items-center gap-4 my-1">
-                      <div className={`flex-1 h-px ${isDark ? "bg-zinc-800" : "bg-zinc-200"}`}></div>
-                      <span className={`text-xs uppercase tracking-wider font-bold ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Opsione të Tjera</span>
-                      <div className={`flex-1 h-px ${isDark ? "bg-zinc-800" : "bg-zinc-200"}`}></div>
+                <div className="flex flex-col gap-4">
+                   <div className={`p-4 rounded-xl border ${isDark ? "bg-zinc-950/80 border-emerald-500/30 text-zinc-200" : "bg-emerald-50/50 border-emerald-200 text-zinc-800"}`}>
+                      <div className="flex items-center gap-2 text-xs font-bold text-emerald-500 mb-1">
+                         <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping inline-block"></span>
+                         SISTEMI CLOUD ME SIGURI MAXIMAL
+                      </div>
+                      <p className="text-xs leading-relaxed opacity-90">
+                         Të gjitha dokumentet, shënimet sekrete dhe kodi PIN ruhen automatikisht në Google Cloud Server. Në rast se telefoni humbet apo prishet, me këtë e-mail mund t'i riktheni 100% të gjitha të dhënat!
+                      </p>
                    </div>
 
-                   <button type="button" onClick={handleAnonymousAuth} className={`w-full py-3 flex items-center justify-center gap-2 font-bold rounded-xl transition-colors bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20`}>
-                      <Cloud className="w-5 h-5" /> Aktivizo Cloud Menjëherë (Fast Sync - Pa Shfletues)
-                   </button>
+                   <div className="flex flex-col gap-1.5">
+                      <label className={`text-xs font-bold uppercase tracking-wider ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                         Adresa e Llogarisë tuaj Google:
+                      </label>
+                      <input
+                         type="email"
+                         value={email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com'}
+                         onChange={(e) => {
+                            const val = e.target.value;
+                            setEmail(val);
+                            localStorage.setItem('grid_notepad_saved_email', val);
+                         }}
+                         placeholder="Adresa e-mail Google (p.sh. genti8319@gmail.com)"
+                         className={`w-full px-4 py-3 rounded-xl border text-sm font-semibold outline-none transition-colors ${
+                             isDark ? "bg-zinc-950 border-zinc-700 text-white focus:border-emerald-500" : "bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-emerald-500"
+                         }`}
+                      />
+                   </div>
 
-                   <button type="button" onClick={loginWithGoogle} className={`w-full py-2.5 flex items-center justify-center gap-2 font-medium rounded-xl transition-colors border text-sm ${
-                      isDark ? "bg-zinc-950 border-zinc-700 text-zinc-300 hover:bg-zinc-800" : "bg-white border-zinc-300 text-zinc-700 hover:bg-zinc-50"
-                   }`}>
-                      Google (Për Shfletues Web / PWA)
-                   </button>
-
-                   <p className="text-center text-xs mt-1 text-zinc-500 font-medium bg-zinc-500/10 p-3 rounded-lg leading-relaxed">
-                      💡 <b>Këshillë për APK (Android):</b> Nëse jeni në aplikacionin APK, përdorni <b>Email/Password</b> ose <b>Fast Sync</b> për të qëndruar 100% brenda aplikacionit pa u kaluar në shfletuesin Chrome!
-                   </p>
-                   <p className="text-center text-xs mt-3 text-zinc-500 font-medium bg-zinc-500/10 p-3 rounded-lg">
-                      {isSignUp ? 'Tashmë i keni dhënë informacionet dhe keni një llogari aktive në Firebase? ' : 'Për të pasur akses në sistemin Cloud (Firebase) fillimisht duhet të regjistroheni për të aktivizuar hapësirën tuaj personale. '}
-                      <button type="button" onClick={() => setIsSignUp(!isSignUp)} className="text-accent-500 font-bold hover:underline ml-1">
-                         {isSignUp ? 'Hyr këtu (Login)' : 'Krijo llogari (Register)'}
+                   <div className="grid grid-cols-1 gap-2.5 mt-1">
+                      <button 
+                         type="button" 
+                         onClick={async () => {
+                            const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
+                            localStorage.setItem('grid_notepad_saved_email', mail);
+                            showToast("Po dërgohen të dhënat në Google Cloud...");
+                            await syncWithGoogleCloud(documents, false);
+                         }} 
+                         className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 text-sm"
+                      >
+                         <Cloud className="w-5 h-5" /> ⚡ Sinkronizo / Ruaj Tani në Cloud
                       </button>
-                   </p>
-                   <button type="button" onClick={() => setDebugLogsModal(true)} className="text-xs text-zinc-500 hover:text-accent-500 mt-4 underline text-center w-full">
-                       Shiko gabimet e lidhjes (Logs)
-                   </button>
-                </form>
+
+                      <button 
+                         type="button" 
+                         onClick={async () => {
+                            const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
+                            localStorage.setItem('grid_notepad_saved_email', mail);
+                            showToast("Po shkarkohen dokumentet tuaja nga Cloud...");
+                            await loadFromGoogleCloud(false);
+                         }} 
+                         className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 text-sm"
+                      >
+                         <Download className="w-5 h-5" /> 📥 Importo Dokumentet nga Cloud
+                      </button>
+                   </div>
+
+                   <div className="flex items-center justify-between pt-2 border-t border-zinc-800">
+                      <button type="button" onClick={() => setDebugLogsModal(true)} className="text-xs text-emerald-400 hover:underline flex items-center gap-1 font-mono">
+                         <Terminal className="w-3.5 h-3.5" /> Logcat Console / Diagnostikimi
+                      </button>
+                      <button type="button" onClick={() => setAuthModal(false)} className="text-xs text-zinc-400 hover:text-white">
+                         Mbyll
+                      </button>
+                   </div>
+                </div>
              </div>
           </div>
       )}
