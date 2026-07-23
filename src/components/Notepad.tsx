@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getDirectoryHandle, saveDirectoryHandle } from '../lib/directoryFS';
-import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen, Terminal, Copy, CheckCheck, Folder, User } from 'lucide-react';
+import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen, Terminal, Copy, CheckCheck, Folder, User, Key } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { useFirebase } from '../hooks/useFirebase';
@@ -625,6 +625,8 @@ export function Notepad() {
      updateLogs();
      return () => window.removeEventListener('debug-log-updated', updateLogs);
   }, []);
+  const [userGeminiKey, setUserGeminiKey] = useState<string>(() => localStorage.getItem('grid_notepad_gemini_key') || '');
+  const [showKeyConfig, setShowKeyConfig] = useState<boolean>(false);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [aiChatImage, setAiChatImage] = useState<string | null>(null);
   const [pendingAiChanges, setPendingAiChanges] = useState<{ documentId: string, newHeaders: string[], newColumnWidths?: number[], newRows: GridRow[] } | null>(null);
@@ -804,12 +806,25 @@ export function Notepad() {
        if (response && response.ok) {
           data = await response.json();
        } else {
-          // If a custom API Key is saved in localStorage, try direct client fallback
-          const userSavedKey = localStorage.getItem('grid_notepad_gemini_key') || '';
-          if (userSavedKey) {
-             appendDebugLog(`🔄 [AI Gemini] Server-i nuk u përgjigj. Po provohet lidhja direkte me Gemini API Key personale...`);
+          // Direct Client-Side Gemini Call Fallback (for APK / Offline / HTML SPA fallback)
+          let activeApiKey = userGeminiKey || localStorage.getItem('grid_notepad_gemini_key') || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+          
+          if (!activeApiKey) {
+             const inputKey = window.prompt("⚠️ Serveri AI nuk u përgjigj (APK/Offline). Ju lutem vendosni një Gemini API Key tuajën për të vazhduar:");
+             if (inputKey && inputKey.trim()) {
+                activeApiKey = inputKey.trim();
+                setUserGeminiKey(activeApiKey);
+                localStorage.setItem('grid_notepad_gemini_key', activeApiKey);
+                showToast("🔑 Çelësi Gemini API u ruajt me sukses!");
+             } else {
+                setShowKeyConfig(true);
+             }
+          }
+
+          if (activeApiKey) {
+             appendDebugLog(`🔄 [AI Gemini] Po provohet lidhja direkte me Gemini API Key personale/klientit...`);
              try {
-                const ai = new GoogleGenAI({ apiKey: userSavedKey });
+                const ai = new GoogleGenAI({ apiKey: activeApiKey });
                 const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË.
 Këtu janë të dhënat e dokumenteve aktualë në formatin JSON:
 ${JSON.stringify(docsForAi, null, 2)}
@@ -819,11 +834,24 @@ Dokumenti aktual aktiv që përdoruesi po shikon është me ID: "${activeDocId}"
 TI GJITHMONË DUHET TË KTHESH PËRGJIGJEN TËNDE NË FORMATIN JSON SI MË POSHTË:
 {
   "text": "Teksti i përgjigjes tënde për përdoruesin dhe/ose raporti i llogaritjeve",
-  "actions": []
+  "actions": [
+    {
+       "type": "PROPOSE_COLUMNS_CHANGE",
+       "documentId": "id_e_dokumentit_qe_po_ndryshon",
+       "newHeaders": ["Data", "Emri", "Sasia (kg)", "Cmimi", "Vlera"],
+       "newColumnWidths": [120, 200, 100, 100, 150],
+       "newRows": []
+    },
+    {
+       "type": "UPDATE_DOCUMENT_ROWS",
+       "documentId": "id_e_dokumentit_qe_po_ndryshon",
+       "newRows": []
+    }
+  ]
 }
 Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
-                const candidateModels = ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+                const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
                 let clientError: any = null;
 
                 for (const modelName of candidateModels) {
@@ -872,11 +900,12 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 if (!data && clientError) throw clientError;
              } catch(directErr: any) {
                 console.error("Direct Gemini fallback error:", directErr);
+                appendDebugLog(`❌ [AI Gemini Direct] Gabim: ${directErr.message || directErr}`);
              }
           }
 
           if (!data) {
-             throw new Error(lastErrMessage || "Nuk u arrit lidhja me serverin e AI Gemini.");
+             throw new Error(lastErrMessage || "Nuk u arrit lidhja me serverin e AI Gemini dhe nuk keni vendosur Gemini API Key personale.");
           }
        }
 
@@ -3503,14 +3532,71 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       {aiChatModal && (
           <div className="fixed top-0 right-0 z-[95] w-full max-w-[100vw] sm:w-[400px] flex flex-col shadow-2xl border-l animate-in slide-in-from-right transition-colors"
                style={{ backgroundColor: isDark ? '#18181b' : '#ffffff', borderColor: isDark ? '#3f3f46' : '#e4e4e7', height: '100dvh' }}>
-             <div className={`flex justify-between items-center p-5 border-b shrink-0 ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
-                <h3 className={`text-xl font-bold flex items-center gap-2 ${textColor}`}>
-                   <Sparkles className="w-5 h-5 text-accent-500" /> {t('Asistenti AI', 'AI Assistant')}
-                </h3>
-                <button onClick={() => setAiChatModal(false)} className="p-2 bg-transparent text-zinc-500 hover:text-red-500 transition-colors">
-                   <X className="w-5 h-5"/>
-                </button>
+             <div className={`flex justify-between items-center p-4 border-b shrink-0 ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
+                <div className="flex items-center gap-2">
+                   <h3 className={`text-lg font-bold flex items-center gap-2 ${textColor}`}>
+                      <Sparkles className="w-5 h-5 text-accent-500" /> {t('Asistenti AI', 'AI Assistant')}
+                   </h3>
+                </div>
+                <div className="flex items-center gap-2">
+                   <button
+                      onClick={() => setShowKeyConfig(!showKeyConfig)}
+                      className={`text-[11px] px-2.5 py-1 rounded-lg border font-semibold flex items-center gap-1.5 transition-all ${
+                         userGeminiKey ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30' : 'bg-amber-500/10 text-amber-500 border-amber-500/30 hover:bg-amber-500/20'
+                      }`}
+                      title="Konfiguro Gemini API Key për APK / Offline"
+                   >
+                      <Key className="w-3.5 h-3.5" />
+                      {userGeminiKey ? 'API Key Personale' : 'Cilëso API Key'}
+                   </button>
+                   <button onClick={() => setAiChatModal(false)} className="p-1.5 bg-transparent text-zinc-500 hover:text-red-500 transition-colors">
+                      <X className="w-5 h-5"/>
+                   </button>
+                </div>
              </div>
+
+             {/* API KEY CONFIG CARD */}
+             {showKeyConfig && (
+                <div className={`m-4 p-3.5 rounded-xl border flex flex-col gap-2 shrink-0 animate-in fade-in slide-in-from-top-2 ${
+                   isDark ? "bg-zinc-900 border-amber-500/30" : "bg-amber-50/90 border-amber-300"
+                }`}>
+                   <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                         <Key className="w-4 h-4 text-amber-500" /> Çelësi i Veçantë Gemini API
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono">APK / Direct</span>
+                   </div>
+                   <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-tight">
+                      Vendosni Gemini API Key për të garantuar punën e AI direkt nga telefoni në APK.
+                   </p>
+                   <div className="flex items-center gap-2 mt-1">
+                      <input
+                         type="password"
+                         placeholder="AIzaSy..."
+                         value={userGeminiKey}
+                         onChange={(e) => setUserGeminiKey(e.target.value)}
+                         className={`flex-1 px-3 py-1.5 text-xs rounded-lg border focus:outline-none focus:border-amber-500 font-mono ${
+                            isDark ? "bg-zinc-950 border-zinc-700 text-white" : "bg-white border-zinc-300 text-zinc-900"
+                         }`}
+                      />
+                      <button
+                         onClick={() => {
+                            if (userGeminiKey.trim()) {
+                               localStorage.setItem('grid_notepad_gemini_key', userGeminiKey.trim());
+                               showToast("🔑 Gemini API Key u ruajt me sukses!");
+                            } else {
+                               localStorage.removeItem('grid_notepad_gemini_key');
+                               showToast("Çelësi u fshi.");
+                            }
+                            setShowKeyConfig(false);
+                         }}
+                         className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg shadow shrink-0"
+                      >
+                         Ruaj Key
+                      </button>
+                   </div>
+                </div>
+             )}
              
              <div className="p-5 overflow-y-auto flex-1 flex flex-col gap-4">
                 {aiChatResponse ? (

@@ -124,9 +124,10 @@ async function startServer() {
 
   // AI API Route handlers
   app.post('/api/ai/chat', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
       if (!process.env.GEMINI_API_KEY) {
-        return res.status(500).json({ error: 'GEMINI_API_KEY environment variable is missing.' });
+        return res.status(500).json({ error: 'GEMINI_API_KEY environment variable is missing on server.' });
       }
 
       const { prompt, documents, activeDocId, image, audio } = req.body;
@@ -158,7 +159,7 @@ TI GJITHMONË DUHET TË KTHESH PËRGJIGJEN TËNDE NË FORMATIN JSON SI MË POSHT
 }
 Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
-      const candidateModels = ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
       let lastError: any = null;
 
       for (const modelName of candidateModels) {
