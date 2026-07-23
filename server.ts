@@ -159,7 +159,7 @@ TI GJITHMONË DUHET TË KTHESH PËRGJIGJEN TËNDE NË FORMATIN JSON SI MË POSHT
 }
 Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
-      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      const candidateModels = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
       let lastError: any = null;
 
       for (const modelName of candidateModels) {
