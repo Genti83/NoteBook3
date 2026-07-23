@@ -861,7 +861,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 }
              };
 
-             const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+             const candidateModels = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.6-flash', 'gemini-3.1-flash-lite'];
 
              // First try official @google/genai Client SDK
              try {
@@ -894,8 +894,16 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                       break;
                    } catch(mErr: any) {
                       console.warn(`Client SDK model ${modelName} failed:`, mErr);
-                      clientErrorMsg = mErr.message || String(mErr);
+                      const rawMsg = mErr.message || String(mErr);
+                      clientErrorMsg = rawMsg;
                       appendDebugLog(`⚠️ [AI Gemini Client SDK] Modeli ${modelName} dështoi: ${clientErrorMsg}`);
+                      
+                      const errStr = rawMsg.toLowerCase();
+                      if (errStr.includes('api key') || errStr.includes('api_key') || errStr.includes('unauthenticated') || errStr.includes('invalid key') || errStr.includes('key not valid') || errStr.includes('not authorized')) {
+                         clientErrorMsg = "Çelësi i API-t (API Key) që keni vendosur nuk është i vlefshëm ose nuk është aktivizuar akoma.";
+                         appendDebugLog(`❌ [AI Gemini Client SDK] Gabim kritik me Çelësin API. Ndalohet kërkimi.`);
+                         break;
+                      }
                    }
                 }
              } catch(sdkErr: any) {
@@ -903,7 +911,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 clientErrorMsg = sdkErr.message || String(sdkErr);
              }
 
-             if (!data) {
+             if (!data && !(clientErrorMsg && (clientErrorMsg.includes("Çelësi") || clientErrorMsg.includes("vlefshëm")))) {
                 for (const modelName of candidateModels) {
                 try {
                    appendDebugLog(`📡 [AI Gemini Direct REST] Po dërgohet te model ${modelName}...`);
@@ -930,8 +938,16 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                       break;
                    } else {
                       const errObj = await restRes.json().catch(() => ({}));
-                      clientErrorMsg = errObj?.error?.message || `HTTP ${restRes.status}`;
+                      const rawMsg = errObj?.error?.message || `HTTP ${restRes.status}`;
+                      clientErrorMsg = rawMsg;
                       appendDebugLog(`⚠️ [AI Gemini Direct REST] Modeli ${modelName} ktheu gabim: ${clientErrorMsg}`);
+                      
+                      const errStr = rawMsg.toLowerCase();
+                      if (errStr.includes('api key') || errStr.includes('api_key') || errStr.includes('unauthenticated') || errStr.includes('invalid key') || errStr.includes('key not valid') || restRes.status === 400 || restRes.status === 403 || restRes.status === 401) {
+                         clientErrorMsg = "Çelësi i API-t (API Key) që keni vendosur nuk është i vlefshëm ose nuk është aktivizuar akoma.";
+                         appendDebugLog(`❌ [AI Gemini Direct REST] Gabim kritik me Çelësin API. Ndalohet kërkimi.`);
+                         break;
+                      }
                    }
                 } catch(e: any) {
                    console.warn(`Direct Gemini REST model ${modelName} failed:`, e);
@@ -943,7 +959,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
              if (!data && clientErrorMsg) {
                 appendDebugLog(`❌ [AI Gemini Direct REST] Të gjitha modelet dështuan: ${clientErrorMsg}`);
-                if (clientErrorMsg.includes('API key') || clientErrorMsg.includes('UNAUTHENTICATED') || clientErrorMsg.includes('invalid')) {
+                if (clientErrorMsg.includes('API key') || clientErrorMsg.includes('UNAUTHENTICATED') || clientErrorMsg.includes('invalid') || clientErrorMsg.includes('vlefshëm')) {
                    setShowKeyConfig(true);
                    showToast("⚠️ Çelësi i Gemini API nuk është i vlefshëm. Ju lutem shkruani një çelës të ri.");
                 }
@@ -1545,17 +1561,24 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       latestDocsRef.current = updatedDocs;
       pendingLocalSaveRef.current = true;
       
+      setAutoSaveMsg('Duke u ruajtur...');
+      
       if (localSaveTimeout.current) clearTimeout(localSaveTimeout.current);
       localSaveTimeout.current = setTimeout(() => {
           localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(updatedDocs));
           pendingLocalSaveRef.current = false;
+          
+          const freq = parseInt(localStorage.getItem('grid_cloud_sync_freq') || '3000', 10);
+          if (freq === -1 || !navigator.onLine) {
+             setAutoSaveMsg('U ruajt lokalisht');
+             setTimeout(() => setAutoSaveMsg(''), 1500);
+          }
       }, 300);
 
       const freq = parseInt(localStorage.getItem('grid_cloud_sync_freq') || '3000', 10);
       if (freq === -1) return; // Off
 
       setIsSaving(true);
-      setAutoSaveMsg('Po ruan...');
       
       if (autoSaveTimeout.current) clearTimeout(autoSaveTimeout.current);
       autoSaveTimeout.current = setTimeout(async () => {
@@ -1790,12 +1813,31 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
   };
 
   const createNewDocument = () => {
-    setActiveDocId(`doc-${Date.now()}`);
-    setTitle(t('Shënim i Paemërtuar', 'Untitled Note'));
+    const newId = `doc-${Date.now()}`;
+    const newTitle = t('Shënim i Paemërtuar', 'Untitled Note');
+    const newHeaders = [t('Kolona 1', 'Column 1'), t('Kolona 2', 'Column 2'), t('Kolona 3', 'Column 3'), t('Kolona 4', 'Column 4')];
+    const newRows = getEmptyRows();
+    
+    setActiveDocId(newId);
+    setTitle(newTitle);
     setActiveTags([]);
-    setRows(getEmptyRows());
-    setHeaders([t('Kolona 1', 'Column 1'), t('Kolona 2', 'Column 2'), t('Kolona 3', 'Column 3'), t('Kolona 4', 'Column 4')]);
+    setRows(newRows);
+    setHeaders(newHeaders);
     setSelectedRows(new Set());
+    
+    const newDocObj: GridDocument = {
+       id: newId,
+       title: newTitle,
+       createdAt: new Date().toISOString(),
+       updatedAt: new Date().toISOString(),
+       headers: newHeaders,
+       columnWidths: [],
+       rows: newRows,
+       tags: []
+    };
+    const updatedDocs = [newDocObj, ...documents];
+    setDocuments(updatedDocs);
+    triggerAutoSave(updatedDocs);
   };
 
   const openDocument = (doc: GridDocument) => {
