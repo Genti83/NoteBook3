@@ -599,10 +599,13 @@ export function Notepad() {
   };
 
   const getApiEndpoints = (path: string): string[] => {
+     const savedCustomServer = (localStorage.getItem('grid_notepad_custom_server') || '').trim();
+     const customEndpoint = savedCustomServer ? `${savedCustomServer.replace(/\/$/, '')}${path}` : '';
+
      if (Capacitor.isNativePlatform()) {
         const devOrigin = `https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app${path}`;
         const preOrigin = `https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app${path}`;
-        return [preOrigin, devOrigin];
+        return Array.from(new Set([customEndpoint, preOrigin, devOrigin].filter(Boolean)));
      }
 
      const currentOrigin = typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.startsWith('http')
@@ -611,7 +614,7 @@ export function Notepad() {
 
      const relativePath = path;
      const fullCurrentOrigin = currentOrigin ? `${currentOrigin}${path}` : '';
-     return Array.from(new Set([relativePath, fullCurrentOrigin].filter(Boolean)));
+     return Array.from(new Set([customEndpoint, relativePath, fullCurrentOrigin].filter(Boolean)));
   };
 
   useEffect(() => {
@@ -808,18 +811,6 @@ export function Notepad() {
        } else {
           // Direct Client-Side Gemini Call Fallback (for APK / Offline / HTML SPA fallback)
           let activeApiKey = userGeminiKey || localStorage.getItem('grid_notepad_gemini_key') || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
-          
-          if (!activeApiKey) {
-             const inputKey = window.prompt("⚠️ Serveri AI nuk u përgjigj (APK/Offline). Ju lutem vendosni një Gemini API Key tuajën për të vazhduar:");
-             if (inputKey && inputKey.trim()) {
-                activeApiKey = inputKey.trim();
-                setUserGeminiKey(activeApiKey);
-                localStorage.setItem('grid_notepad_gemini_key', activeApiKey);
-                showToast("🔑 Çelësi Gemini API u ruajt me sukses!");
-             } else {
-                setShowKeyConfig(true);
-             }
-          }
 
           if (activeApiKey) {
              appendDebugLog(`🔄 [AI Gemini REST Direct] Po përdoret çelësi API: ${activeApiKey.slice(0, 6)}...`);
@@ -963,9 +954,9 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
              if (clientErrorMsg) {
                 throw new Error(`Gabim nga Google Gemini API: ${clientErrorMsg}`);
              } else if (!activeApiKey) {
-                throw new Error("Për të përdorur AI Gemini në APK, ju lutemi vendosni Gemini API Key te cilësimet e AI Gemini me ikonën ⚙️.");
+                throw new Error("Nuk u arrit lidhja me serverin e AI Gemini. Ju lutem kontrolloni lidhjen e internetit tuaj.");
              } else {
-                throw new Error(lastErrMessage || "Nuk u arrit lidhja me AI Gemini. Ju lutem kontrolloni lidhjen dhe çelësin API.");
+                throw new Error(lastErrMessage || "Nuk u arrit lidhja me AI Gemini. Ju lutem kontrolloni lidhjen tuaj.");
              }
           }
        }
