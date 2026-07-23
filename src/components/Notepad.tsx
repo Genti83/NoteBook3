@@ -481,6 +481,8 @@ export function Notepad() {
   const [blueModal, setBlueModal] = useState(false);
   const [blueText, setBlueText] = useState('');
   const [secretList, setSecretList] = useState<{id: string, text: string, done: boolean}[]>([]);
+  const [secretActiveTab, setSecretActiveTab] = useState<'editor' | 'list'>('editor');
+  const secretFileInputRef = useRef<HTMLInputElement | null>(null);
   const [cloudDocs, setCloudDocs] = useState<GridDocument[]>([]);
   const [isFetchingCloud, setIsFetchingCloud] = useState(false);
 
@@ -493,13 +495,120 @@ export function Notepad() {
      const mail = (email || localStorage.getItem('grid_notepad_saved_email') || localStorage.getItem('grid_notepad_user_account') || 'genti8319@gmail.com').trim();
      localStorage.setItem('grid_notepad_saved_email', mail);
      localStorage.setItem('grid_notepad_user_account', mail);
-     showToast("⚡ Po sinkronizohen dhe përditësohen të dhënat me Google Cloud...");
-     const synced = await syncWithGoogleCloud(documents, true);
-     await loadFromGoogleCloud(true);
+     
+     showToast("⚡ Duke u lidhur me Google Cloud...");
+
+     // 1. Fetch current cloud database state
+     const endpoints = getApiEndpoints(`/api/cloud/load?userId=${encodeURIComponent(mail)}`);
+     let cloudData: any = null;
+
+     for (const ep of endpoints) {
+        try {
+           const res = await fetch(ep);
+           if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+              const json = await res.json();
+              if (json && json.success) {
+                 cloudData = json;
+                 break;
+              }
+           }
+        } catch (e) {
+           console.warn("Error fetching cloud during smart sync:", e);
+        }
+     }
+
+     let mergedDocs = [...documents];
+     let mergedBlueText = blueText;
+     let mergedSecretList = [...secretList];
+
+     if (cloudData) {
+        // A. Merge Notepad Documents
+        const cloudDocsList: GridDocument[] = cloudData.documents || [];
+        const localDocsList = [...documents];
+
+        // Create a map of local documents by ID
+        const localDocsMap = new Map<string, GridDocument>();
+        localDocsList.forEach(d => localDocsMap.set(d.id, d));
+
+        cloudDocsList.forEach(cDoc => {
+           const localDoc = localDocsMap.get(cDoc.id);
+           if (!localDoc) {
+              // Doc exists in cloud but not locally, download/add it!
+              localDocsList.push(cDoc);
+           } else {
+              // Doc exists in both, choose the one with newer updatedAt
+              const localTime = new Date(localDoc.updatedAt || localDoc.createdAt || 0).getTime();
+              const cloudTime = new Date(cDoc.updatedAt || cDoc.createdAt || 0).getTime();
+              if (cloudTime > localTime) {
+                 // Cloud is newer, overwrite local
+                 const idx = localDocsList.findIndex(d => d.id === cDoc.id);
+                 if (idx >= 0) localDocsList[idx] = cDoc;
+              }
+           }
+        });
+        mergedDocs = localDocsList;
+
+        // B. Merge blueText (secrets drafting text)
+        const cloudBlueText = cloudData.blueText || '';
+        if (!mergedBlueText && cloudBlueText) {
+           mergedBlueText = cloudBlueText;
+        } else if (mergedBlueText && cloudBlueText && mergedBlueText !== cloudBlueText) {
+           // If different, merge them elegantly
+           if (!mergedBlueText.includes(cloudBlueText) && !cloudBlueText.includes(mergedBlueText)) {
+              mergedBlueText = cloudBlueText + "\n\n--- Sinkronizuar nga Pajisja tjetër ---\n" + mergedBlueText;
+           } else if (cloudBlueText.length > mergedBlueText.length) {
+              mergedBlueText = cloudBlueText;
+           }
+        }
+
+        // C. Merge Secret Checklist List
+        const cloudSecretList: any[] = cloudData.secretList || [];
+        const localSecretMap = new Map<string, any>();
+        mergedSecretList.forEach(item => localSecretMap.set(item.id, item));
+
+        cloudSecretList.forEach(cItem => {
+           if (!localSecretMap.has(cItem.id)) {
+              mergedSecretList.push(cItem);
+           } else {
+              const localItem = localSecretMap.get(cItem.id);
+              if (localItem) {
+                 localItem.done = localItem.done || cItem.done;
+                 if (cItem.text && !localItem.text) {
+                    localItem.text = cItem.text;
+                 }
+              }
+           }
+        });
+
+        // D. PIN Password Restore
+        if (cloudData.pin && !localStorage.getItem('grid_notepad_pin')) {
+           localStorage.setItem('grid_notepad_pin', cloudData.pin);
+        }
+     }
+
+     // 2. Set the merged state locally and save to localStorage
+     setDocuments(mergedDocs);
+     setCloudDocs(mergedDocs);
+     localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(mergedDocs));
+
+     setBlueText(mergedBlueText);
+     localStorage.setItem('grid_notepad_blue', mergedBlueText);
+
+     setSecretList(mergedSecretList);
+     localStorage.setItem('grid_notepad_secret_list', JSON.stringify(mergedSecretList));
+
+     // Open first document if no document is active
+     if (mergedDocs.length > 0 && !activeDocId) {
+        openDocument(mergedDocs[0]);
+     }
+
+     // 3. Upload the merged/fully synchronized state back to the cloud
+     const synced = await syncWithGoogleCloud(mergedDocs, true);
+     
      if (synced) {
-        showToast("⚡ Sinkronizimi me Google Cloud u krye me sukses 100%!");
+        showToast("⚡ Sinkronizimi i zgjuar (Smart Merge) me Google Cloud u krye me sukses 100%!");
      } else {
-        showToast("Të dhënat u ruajtën lokalisht në pajisje.");
+        showToast("Të dhënat u sinkronizuan lokalisht në këtë pajisje.");
      }
   };
 
@@ -767,7 +876,17 @@ export function Notepad() {
           })
        }));
        
-       const payload = JSON.stringify({ prompt: promptText, documents: docsForAi, activeDocId, image: aiChatImage, audio: aiChatAudio });
+       const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
+       const payload = JSON.stringify({ 
+          prompt: promptText, 
+          documents: docsForAi, 
+          activeDocId, 
+          image: aiChatImage, 
+          audio: aiChatAudio,
+          blueText,
+          secretList,
+          userEmail: mail
+       });
        
        const endpoints = getApiEndpoints('/api/ai/chat');
 
@@ -1129,6 +1248,125 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
        }
     }
     return success;
+  };
+
+  const handleCreateSecretListItem = () => {
+     const newItem = { id: Date.now().toString(), text: '', done: false };
+     const updated = [...secretList, newItem];
+     setSecretList(updated);
+     localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+     showToast("U krijua një element i ri!");
+  };
+
+  const handleCreateSecretEditorNote = () => {
+     const dateStr = format(new Date(), 'yyyy-MM-dd HH:mm');
+     const newNotePrompt = (blueText ? "\n\n" : "") + `--- Shënim i Ri (${dateStr}) ---\n`;
+     const updated = blueText + newNotePrompt;
+     setBlueText(updated);
+     localStorage.setItem('grid_notepad_blue', updated);
+     showToast("U shtua një seksion i ri shënimesh!");
+  };
+
+  const handleSaveSecrets = async () => {
+     localStorage.setItem('grid_notepad_blue', blueText);
+     localStorage.setItem('grid_notepad_secret_list', JSON.stringify(secretList));
+     if (auth.currentUser && navigator.onLine) {
+        const blueRef = doc(db, 'settings', getActiveUid()!);
+        await setDoc(blueRef, { 
+            blueText, 
+            secretList,
+            userId: getActiveUid()!, 
+            pin: localStorage.getItem('grid_notepad_pin') || null 
+        }, { merge: true });
+        showToast("🔒 Shënimet sekrete u ruajtën me sukses në Cloud!");
+     } else {
+        showToast("🔒 Shënimet sekrete u ruajtën lokalisht me sukses!");
+     }
+  };
+
+  const handleDeleteSecrets = () => {
+     if (secretActiveTab === 'list') {
+        const checkedCount = secretList.filter(i => i.done).length;
+        if (checkedCount > 0) {
+           const updated = secretList.filter(i => !i.done);
+           setSecretList(updated);
+           localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+           showToast(`Fshihen ${checkedCount} elemente të përzgjedhur!`);
+        } else {
+           if (confirm("Dëshironi të fshini të gjithë listën e sekreteve?")) {
+              setSecretList([]);
+              localStorage.setItem('grid_notepad_secret_list', JSON.stringify([]));
+              showToast("U fshinë të gjitha!");
+           }
+        }
+     } else {
+        if (confirm("Dëshironi të pastroni plotësisht tekstin e shënimit sekret?")) {
+           setBlueText('');
+           localStorage.setItem('grid_notepad_blue', '');
+           showToast("U pastrua teksti!");
+        }
+     }
+  };
+
+  const handleSelectAllSecrets = () => {
+     if (secretActiveTab === 'list') {
+        if (secretList.length === 0) {
+           showToast("Lista është bosh!");
+           return;
+        }
+        const allDone = secretList.every(i => i.done);
+        const updated = secretList.map(i => ({ ...i, done: !allDone }));
+        setSecretList(updated);
+        localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+        showToast(allDone ? "U çpërzgjodhën të gjitha!" : "U përzgjodhën të gjitha!");
+     } else {
+        showToast("Zgjedhja vlen vetëm për listën e sekreteve!");
+     }
+  };
+
+  const handleExportSecrets = () => {
+     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
+        blueText,
+        secretList
+     }, null, 2));
+     const downloadAnchor = document.createElement('a');
+     downloadAnchor.setAttribute("href", dataStr);
+     downloadAnchor.setAttribute("download", `bllok_sekrete_backup_${format(new Date(), 'yyyyMMdd_HHmmss')}.json`);
+     document.body.appendChild(downloadAnchor);
+     downloadAnchor.click();
+     downloadAnchor.remove();
+     showToast("Dosja e sekreteve u shkarkua me sukses!");
+  };
+
+  const handleImportSecretsClick = () => {
+     secretFileInputRef.current?.click();
+  };
+
+  const handleImportSecretsFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+     const file = e.target.files?.[0];
+     if (!file) return;
+     const reader = new FileReader();
+     reader.onload = (event) => {
+        try {
+           const parsed = JSON.parse(event.target?.result as string);
+           if (parsed.blueText !== undefined) {
+              setBlueText(parsed.blueText);
+              localStorage.setItem('grid_notepad_blue', parsed.blueText);
+           }
+           if (parsed.secretList && Array.isArray(parsed.secretList)) {
+              setSecretList(parsed.secretList);
+              localStorage.setItem('grid_notepad_secret_list', JSON.stringify(parsed.secretList));
+           }
+           showToast("🔒 Të dhënat sekrete u importuan me sukses!");
+        } catch (err) {
+           const textContent = event.target?.result as string;
+           setBlueText(textContent);
+           localStorage.setItem('grid_notepad_blue', textContent);
+           setSecretActiveTab('editor');
+           showToast("🔒 U importua si tekst i thjeshtë në editor.");
+        }
+     };
+     reader.readAsText(file);
   };
 
   const loadFromGoogleCloud = async (silent = false) => {
@@ -3003,94 +3241,186 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                       <X className="w-5 h-5"/>
                    </button>
                 </div>
+
+                {/* Sub-toolbar inside Secrets Modal */}
+                <div className={`p-3 border-b flex flex-wrap gap-1.5 justify-start items-center shrink-0 ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+                   <button 
+                      onClick={() => setSecretActiveTab('editor')} 
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border flex items-center gap-1 ${
+                         secretActiveTab === 'editor' 
+                         ? (isDark ? "bg-blue-600 border-transparent text-white" : "bg-blue-500 border-transparent text-white") 
+                         : (isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700" : "bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-200")
+                      }`}
+                   >
+                      <FileText className="w-3.5 h-3.5 text-current" /> Editor
+                   </button>
+
+                   <button 
+                      onClick={() => setSecretActiveTab('list')} 
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border flex items-center gap-1 ${
+                         secretActiveTab === 'list' 
+                         ? (isDark ? "bg-blue-600 border-transparent text-white" : "bg-blue-500 border-transparent text-white") 
+                         : (isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700" : "bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-200")
+                      }`}
+                   >
+                      <CheckCheck className="w-3.5 h-3.5 text-current" /> Listë
+                   </button>
+
+                   <div className="h-4 w-px bg-zinc-500/30 mx-1" />
+
+                   <button 
+                      onClick={secretActiveTab === 'list' ? handleCreateSecretListItem : handleCreateSecretEditorNote} 
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${
+                         isDark ? "bg-green-600 hover:bg-green-500 text-white border-transparent" : "bg-green-500 hover:bg-green-600 text-white border-transparent"
+                      }`}
+                      title="Krijo element/shënim të ri"
+                   >
+                      <Plus className="w-3.5 h-3.5" /> Krijo
+                   </button>
+
+                   <button 
+                      onClick={handleSelectAllSecrets} 
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${
+                         isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700" : "bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-200"
+                      } ${secretActiveTab !== 'list' ? 'opacity-40 cursor-not-allowed' : ''}`}
+                      title="Zgjidh të gjitha / Çpërzgjidh"
+                      disabled={secretActiveTab !== 'list'}
+                   >
+                      <Square className="w-3.5 h-3.5" /> Zgjidh All
+                   </button>
+
+                   <button 
+                      onClick={handleSaveSecrets} 
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${
+                         isDark ? "bg-emerald-600 hover:bg-emerald-500 text-white border-transparent" : "bg-emerald-500 hover:bg-emerald-600 text-white border-transparent"
+                      }`}
+                      title="Ruaj"
+                   >
+                      <Save className="w-3.5 h-3.5" /> Ruaj
+                   </button>
+
+                   <button 
+                      onClick={handleDeleteSecrets} 
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${
+                         isDark ? "bg-red-600 hover:bg-red-500 text-white border-transparent" : "bg-red-500 hover:bg-red-600 text-white border-transparent"
+                      }`}
+                      title="Fshij elementet e përzgjedhur apo pastro editorin"
+                   >
+                      <Trash2 className="w-3.5 h-3.5" /> Fshij
+                   </button>
+
+                   <button 
+                      onClick={handleImportSecretsClick} 
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${
+                         isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700" : "bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-200"
+                      }`}
+                      title="Importo të dhëna"
+                   >
+                      <FolderUp className="w-3.5 h-3.5" /> Import
+                   </button>
+
+                   <button 
+                      onClick={handleExportSecrets} 
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${
+                         isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700" : "bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-200"
+                      }`}
+                      title="Eksporto të dhëna"
+                   >
+                      <FolderDown className="w-3.5 h-3.5" /> Export
+                   </button>
+
+                   {/* Hidden File Input for Secrets Import */}
+                   <input 
+                      type="file" 
+                      ref={secretFileInputRef} 
+                      onChange={handleImportSecretsFile} 
+                      accept=".json,.txt" 
+                      className="hidden" 
+                   />
+                </div>
                 
-                <div className={`flex-1 p-5 ${isDark ? "bg-zinc-950" : "bg-blue-50/30"}`}>
+                <div className={`flex-1 p-5 overflow-y-auto ${isDark ? "bg-zinc-950" : "bg-blue-50/30"}`}>
 
                    <div className="flex flex-col h-full gap-4">
-                     {/* Lista e Sekreteve */}
-                     <div className={`flex-1 rounded-xl p-3 flex flex-col ${isDark ? "bg-zinc-900 border border-zinc-800" : "bg-white border border-zinc-200 shadow-sm"}`}>
-                        <div className="flex items-center justify-between mb-3">
-                           <h4 className={`text-sm font-bold ${isDark ? "text-blue-400" : "text-blue-600"}`}>Lista e Sekreteve</h4>
-                           <button 
-                             onClick={() => {
-                                const newItem = { id: Date.now().toString(), text: '', done: false };
-                                const updated = [...secretList, newItem];
-                                setSecretList(updated);
-                                localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
-                             }}
-                             className={`p-1.5 rounded-lg ${isDark ? "hover:bg-zinc-800 text-blue-400" : "hover:bg-blue-50 text-blue-600"}`}
-                           >
-                             <Plus className="w-4 h-4" />
-                           </button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto pr-1 scrollbar-hide space-y-2">
-                           {secretList.length === 0 && (
-                              <p className={`text-xs text-center mt-4 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Nuk ka asnjë element në listë.</p>
-                           )}
-                           {secretList.map((item, idx) => (
-                              <div key={item.id} className="flex items-start gap-2 group">
-                                 <button 
-                                   onClick={() => {
-                                      const updated = [...secretList];
-                                      updated[idx].done = !updated[idx].done;
-                                      setSecretList(updated);
-                                      localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
-                                   }}
-                                   className={`mt-1 w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
-                                     item.done 
-                                      ? "bg-blue-500 border-blue-500 text-white" 
-                                      : (isDark ? "border-zinc-600 text-transparent" : "border-zinc-400 text-transparent")
-                                   }`}
-                                 >
-                                    <Check className="w-3 h-3" />
-                                 </button>
-                                 <input
-                                   type="text"
-                                   value={item.text}
-                                   onChange={(e) => {
-                                      const updated = [...secretList];
-                                      updated[idx].text = e.target.value;
-                                      setSecretList(updated);
-                                      localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
-                                   }}
-                                   placeholder="Shkruaj diçka..."
-                                   className={`flex-1 bg-transparent border-none outline-none text-sm ${
-                                      item.done ? (isDark ? "text-zinc-500 line-through" : "text-zinc-400 line-through") : (isDark ? "text-zinc-200" : "text-zinc-800")
-                                   }`}
-                                 />
-                                 <button
-                                   onClick={() => {
-                                      const updated = secretList.filter(i => i.id !== item.id);
-                                      setSecretList(updated);
-                                      localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
-                                   }}
-                                   className="opacity-0 group-hover:opacity-100 p-1 text-red-500 hover:bg-red-500/10 rounded transition-all"
-                                 >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                 </button>
-                              </div>
-                           ))}
-                        </div>
-                     </div>
-
-                     {/* Hartim Text (Text Drafting) */}
-                     <div className={`flex-1 rounded-xl p-3 flex flex-col ${isDark ? "bg-zinc-950 border border-zinc-800" : "bg-white border border-zinc-200 shadow-sm"}`}>
-                        <h4 className={`text-sm font-bold mb-2 ${isDark ? "text-blue-400" : "text-blue-600"}`}>Hartim Tekst</h4>
-                        <textarea
-                           autoFocus
-                           value={blueText}
-                           onChange={(e) => {
-                               const val = e.target.value;
-                               setBlueText(val);
-                               localStorage.setItem('grid_notepad_blue', val);
-                           }}
-                           placeholder="Këtu mund të mbani shënime të rëndësishme ose sekrete të mbrojtura me Password..."
-                           className={`w-full h-full bg-transparent resize-none focus:outline-none text-sm leading-relaxed scrollbar-hide ${
-                             isDark ? "text-zinc-200 placeholder-zinc-700" : "text-zinc-800 placeholder-zinc-400"
-                           }`}
-                           spellCheck={false}
-                        />
-                     </div>
+                      {secretActiveTab === 'list' ? (
+                         /* Lista e Sekreteve */
+                         <div className={`flex-1 rounded-xl p-3 flex flex-col min-h-[300px] ${isDark ? "bg-zinc-900 border border-zinc-800" : "bg-white border border-zinc-200 shadow-sm"}`}>
+                            <div className="flex items-center justify-between mb-3 border-b pb-2">
+                               <h4 className={`text-sm font-bold ${isDark ? "text-blue-400" : "text-blue-600"}`}>Lista e Sekreteve</h4>
+                               <span className="text-xs text-zinc-500 font-mono">Total: {secretList.length}</span>
+                            </div>
+                            <div className="flex-1 overflow-y-auto pr-1 scrollbar-hide space-y-2">
+                               {secretList.length === 0 && (
+                                  <p className={`text-xs text-center mt-10 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Nuk ka asnjë element në listë. Kliko "Krijo" më sipër për të shtuar.</p>
+                               )}
+                               {secretList.map((item, idx) => (
+                                  <div key={item.id} className="flex items-start gap-2 group border-b border-zinc-500/10 pb-1">
+                                     <button 
+                                       onClick={() => {
+                                          const updated = [...secretList];
+                                          updated[idx].done = !updated[idx].done;
+                                          setSecretList(updated);
+                                          localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+                                       }}
+                                       className={`mt-1 w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                                         item.done 
+                                          ? "bg-blue-500 border-blue-500 text-white" 
+                                          : (isDark ? "border-zinc-600 text-transparent" : "border-zinc-400 text-transparent")
+                                       }`}
+                                     >
+                                        <Check className="w-3 h-3" />
+                                     </button>
+                                     <input
+                                       type="text"
+                                       value={item.text}
+                                       onChange={(e) => {
+                                          const updated = [...secretList];
+                                          updated[idx].text = e.target.value;
+                                          setSecretList(updated);
+                                          localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+                                       }}
+                                       placeholder="Shkruaj diçka..."
+                                       className={`flex-1 bg-transparent border-none outline-none text-sm ${
+                                          item.done ? (isDark ? "text-zinc-500 line-through" : "text-zinc-400 line-through") : (isDark ? "text-zinc-200" : "text-zinc-800")
+                                       }`}
+                                     />
+                                     <button
+                                       onClick={() => {
+                                          const updated = secretList.filter(i => i.id !== item.id);
+                                          setSecretList(updated);
+                                          localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+                                       }}
+                                       className="opacity-0 group-hover:opacity-100 p-1 text-red-500 hover:bg-red-500/10 rounded transition-all"
+                                     >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                     </button>
+                                  </div>
+                               ))}
+                            </div>
+                         </div>
+                      ) : (
+                         /* Hartim Text (Text Drafting) */
+                         <div className={`flex-1 rounded-xl p-3 flex flex-col min-h-[300px] ${isDark ? "bg-zinc-950 border border-zinc-800" : "bg-white border border-zinc-200 shadow-sm"}`}>
+                            <div className="flex items-center justify-between mb-2 border-b pb-2">
+                               <h4 className={`text-sm font-bold ${isDark ? "text-blue-400" : "text-blue-600"}`}>Hartim Tekst</h4>
+                               <span className="text-xs text-zinc-500 font-mono">Gjatësia: {blueText.length}</span>
+                            </div>
+                            <textarea
+                               autoFocus
+                               value={blueText}
+                               onChange={(e) => {
+                                   const val = e.target.value;
+                                   setBlueText(val);
+                                   localStorage.setItem('grid_notepad_blue', val);
+                               }}
+                               placeholder="Këtu mund të mbani shënime të rëndësishme ose sekrete të mbrojtura me Password..."
+                               className={`w-full h-full bg-transparent resize-none focus:outline-none text-sm leading-relaxed scrollbar-hide min-h-[250px] ${
+                                 isDark ? "text-zinc-200 placeholder-zinc-700" : "text-zinc-800 placeholder-zinc-400"
+                               }`}
+                               spellCheck={false}
+                            />
+                         </div>
+                      )}
                    </div>
 
                 </div>
@@ -4459,19 +4789,17 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                  <Lock className="w-3.5 h-3.5" /> Sekrete
                </button>
 
+               <button onClick={openCloudModal} className={`flex-shrink-0 snap-start flex justify-center items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg transition-colors border shadow-md active:scale-95 ${
+                 isDark ? "bg-green-600 hover:bg-green-500 text-white border-transparent" : "bg-green-500 hover:bg-green-600 text-white border-transparent font-bold"
+               }`}>
+                 <Cloud className="w-3.5 h-3.5" /> CLOUD
+               </button>
+
                <button onClick={() => setBackupModal(true)} className={`flex-shrink-0 snap-start flex justify-center items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg transition-colors border active:scale-95 ${
                  isDark ? "bg-accent-600 hover:bg-accent-500 text-white shadow-md border-transparent" : "bg-accent-500 hover:bg-accent-600 text-white shadow-md font-bold border-transparent"
                }`}>
                  <Database className="w-3.5 h-3.5" /> Backup
                </button>
-
-               {user && (
-                 <button onClick={openCloudModal} className={`flex-shrink-0 snap-start flex justify-center items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg transition-colors border shadow-sm active:scale-95 ${
-                   isDark ? "bg-green-600 hover:bg-green-500 text-white shadow-md border-transparent" : "bg-green-500 hover:bg-green-600 text-white shadow-md font-bold border-transparent"
-                 }`}>
-                   <Cloud className="w-3.5 h-3.5" /> Platforma Cloud
-                 </button>
-               )}
 
                <button onClick={() => setAiChatModal(true)} className={`flex-shrink-0 snap-start flex justify-center items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg transition-colors border active:scale-95 ${
                  isDark ? "bg-purple-600 hover:bg-purple-500 text-white shadow-md border-transparent" : "bg-purple-500 hover:bg-purple-600 text-white shadow-md font-bold border-transparent"

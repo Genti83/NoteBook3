@@ -130,14 +130,22 @@ async function startServer() {
         return res.status(500).json({ error: 'GEMINI_API_KEY environment variable is missing on server.' });
       }
 
-      const { prompt, documents, activeDocId, image, audio } = req.body;
+      const { prompt, documents, activeDocId, image, audio, blueText, secretList, userEmail } = req.body;
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-      const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË.
+      const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË (përfshirë ato manuale, të nenvizuara dhe ato në Cloud për llogarinë ${userEmail || 'genti8319@gmail.com'}).
 Këtu janë të dhënat e dokumenteve aktualë në formatin JSON:
 ${JSON.stringify(documents, null, 2)}
 
+Shënimet Sekrete të përdoruesit (Blue/Secret Editor Text):
+${blueText || 'Ska shënime'}
+
+Lista e Checklistave Sekrete:
+${JSON.stringify(secretList || [], null, 2)}
+
 Dokumenti aktual aktiv që përdoruesi po shikon është me ID: "${activeDocId}". Ofroni përgjigjen duke u bazuar plotësisht në KËTË DOKUMENT.
+
+Përdoruesi gjithashtu kërkon që kur bën shënime, nenvizime apo korrigjime manuale, ti si AI të jesh në sinkron të plotë dhe të kryesh përditësime në dokumentet e tij nëse kërkohet përmes aksioneve tona të strukturuara JSON.
 
 TI GJITHMONË DUHET TË KTHESH PËRGJIGJEN TËNDE NË FORMATIN JSON SI MË POSHTË:
 {

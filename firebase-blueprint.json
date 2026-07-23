@@ -1,0 +1,42 @@
+{
+  "entities": {
+    "Document": {
+      "title": "Grid Document",
+      "description": "A spreadsheet-style notepad document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique ID of the document" },
+        "title": { "type": "string", "description": "The title of the document" },
+        "rows": { "type": "array", "description": "Row values of the document grid" },
+        "headers": { "type": "array", "description": "Column headers of the document" },
+        "columnWidths": { "type": "array", "description": "Column width configurations" },
+        "tags": { "type": "array", "description": "Tags associated with the document" },
+        "userId": { "type": "string", "description": "The owner ID or registered email" },
+        "lastUpdated": { "type": "string", "description": "ISO timestamp of last update" }
+      },
+      "required": ["id", "title", "rows", "headers", "userId"]
+    },
+    "Settings": {
+      "title": "User Cloud Settings",
+      "description": "User specific secrets, PIN code and secret draft list",
+      "type": "object",
+      "properties": {
+        "blueText": { "type": "string", "description": "The encrypted or plain drafting text of the secrets modal" },
+        "secretList": { "type": "array", "description": "Secrets checklist items" },
+        "pin": { "type": "string", "description": "Hashed or plain numeric password/PIN" },
+        "userId": { "type": "string", "description": "The user identifier" }
+      },
+      "required": ["userId"]
+    }
+  },
+  "firestore": {
+    "documents/{documentId}": {
+      "schema": "Document",
+      "description": "User notepad documents collection"
+    },
+    "settings/{settingsId}": {
+      "schema": "Settings",
+      "description": "User account settings, PINs, and secret list collection"
+    }
+  }
+}
