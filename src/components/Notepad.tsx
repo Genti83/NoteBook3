@@ -822,10 +822,8 @@ export function Notepad() {
           }
 
           if (activeApiKey) {
-             appendDebugLog(`🔄 [AI Gemini] Po provohet lidhja direkte me Gemini API Key personale/klientit...`);
-             try {
-                const ai = new GoogleGenAI({ apiKey: activeApiKey });
-                const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË.
+             appendDebugLog(`🔄 [AI Gemini REST Direct] Po përdoret çelësi API: ${activeApiKey.slice(0, 6)}...`);
+             const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË.
 Këtu janë të dhënat e dokumenteve aktualë në formatin JSON:
 ${JSON.stringify(docsForAi, null, 2)}
 
@@ -851,56 +849,71 @@ TI GJITHMONË DUHET TË KTHESH PËRGJIGJEN TËNDE NË FORMATIN JSON SI MË POSHT
 }
 Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
-                const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-                let clientError: any = null;
+             const parts: any[] = [{ text: promptText || 'Analizo bllokun mun' }]; 
+             if (aiChatImage && aiChatImage.includes(',')) { 
+               const b = aiChatImage.split(',')[1]; 
+               const m = aiChatImage.split(';')[0].split(':')[1]; 
+               parts.push({ inlineData: { data: b, mimeType: m } }); 
+             } 
+             if (aiChatAudio && aiChatAudio.includes(',')) { 
+               const b = aiChatAudio.split(',')[1]; 
+               const m = aiChatAudio.split(';')[0].split(':')[1]; 
+               parts.push({ inlineData: { data: b, mimeType: m } }); 
+             } 
 
-                for (const modelName of candidateModels) {
-                   try {
-                      appendDebugLog(`📡 [AI Gemini Direct] Po provojmë modelin: ${modelName}`);
-                      const parts: any[] = [{ text: promptText || 'Analizo bllokun mun' }]; 
-                      if (aiChatImage) { 
-                        const b = aiChatImage.split(',')[1]; 
-                        const m = aiChatImage.split(';')[0].split(':')[1]; 
-                        parts.push({ inlineData: { data: b, mimeType: m } }); 
-                      } 
-                      if (aiChatAudio) { 
-                        const b = aiChatAudio.split(',')[1]; 
-                        const m = aiChatAudio.split(';')[0].split(':')[1]; 
-                        parts.push({ inlineData: { data: b, mimeType: m } }); 
-                      } 
-
-                      const resGen = await ai.models.generateContent({
-                         model: modelName,
-                         contents: parts,
-                         config: {
-                            systemInstruction,
-                            temperature: 0.2,
-                            responseMimeType: 'application/json'
-                         }
-                      });
-
-                      let rawText = resGen.text || '{}';
-                      rawText = rawText.trim();
-                      if (rawText.startsWith('```')) {
-                        rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/```$/i, '').trim();
-                      }
-
-                      try {
-                        data = JSON.parse(rawText);
-                      } catch(pe) {
-                        data = { text: resGen.text || 'Analiza u krye me sukses.' };
-                      }
-                      appendDebugLog(`✅ [AI Gemini Direct] Sukses me modelin: ${modelName}`);
-                      break;
-                   } catch(e: any) {
-                      console.warn(`Direct Gemini model ${modelName} failed:`, e);
-                      clientError = e;
-                   }
+             const reqBody = {
+                contents: [{ role: 'user', parts }],
+                systemInstruction: { parts: [{ text: systemInstruction }] },
+                generationConfig: {
+                   temperature: 0.2,
+                   responseMimeType: 'application/json'
                 }
-                if (!data && clientError) throw clientError;
-             } catch(directErr: any) {
-                console.error("Direct Gemini fallback error:", directErr);
-                appendDebugLog(`❌ [AI Gemini Direct] Gabim: ${directErr.message || directErr}`);
+             };
+
+             const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+             let clientErrorMsg = '';
+
+             for (const modelName of candidateModels) {
+                try {
+                   appendDebugLog(`📡 [AI Gemini Direct REST] Po dërgohet te model ${modelName}...`);
+                   const directUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(activeApiKey.trim())}`;
+                   const restRes = await fetch(directUrl, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(reqBody)
+                   });
+
+                   if (restRes.ok) {
+                      const restJson = await restRes.json();
+                      const rawText = restJson?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+                      let cleanText = rawText.trim();
+                      if (cleanText.startsWith('```')) {
+                         cleanText = cleanText.replace(/^```[a-z]*\n?/i, '').replace(/```$/i, '').trim();
+                      }
+                      try {
+                         data = JSON.parse(cleanText);
+                      } catch(pe) {
+                         data = { text: rawText || 'Analiza u krye me sukses.' };
+                      }
+                      appendDebugLog(`✅ [AI Gemini Direct REST] Sukses me modelin: ${modelName}`);
+                      break;
+                   } else {
+                      const errObj = await restRes.json().catch(() => ({}));
+                      clientErrorMsg = errObj?.error?.message || `HTTP ${restRes.status}`;
+                      appendDebugLog(`⚠️ [AI Gemini Direct REST] Modeli ${modelName} ktheu gabim: ${clientErrorMsg}`);
+                   }
+                } catch(e: any) {
+                   console.warn(`Direct Gemini REST model ${modelName} failed:`, e);
+                   clientErrorMsg = e.message || 'Gabim lidhje me Google API';
+                }
+             }
+
+             if (!data && clientErrorMsg) {
+                appendDebugLog(`❌ [AI Gemini Direct REST] Të gjitha modelet dështuan: ${clientErrorMsg}`);
+                if (clientErrorMsg.includes('API key') || clientErrorMsg.includes('UNAUTHENTICATED') || clientErrorMsg.includes('invalid')) {
+                   setShowKeyConfig(true);
+                   showToast("⚠️ Çelësi i Gemini API nuk është i vlefshëm. Ju lutem shkruani një çelës të ri.");
+                }
              }
           }
 
