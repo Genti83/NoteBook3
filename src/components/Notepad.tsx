@@ -599,19 +599,18 @@ export function Notepad() {
   };
 
   const getApiEndpoints = (path: string): string[] => {
+     if (Capacitor.isNativePlatform()) {
+        const devOrigin = `https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app${path}`;
+        const preOrigin = `https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app${path}`;
+        return [preOrigin, devOrigin];
+     }
+
      const currentOrigin = typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.startsWith('http')
        ? window.location.origin
        : '';
 
      const relativePath = path;
      const fullCurrentOrigin = currentOrigin ? `${currentOrigin}${path}` : '';
-
-     if (Capacitor.isNativePlatform()) {
-        const devOrigin = `https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app${path}`;
-        const preOrigin = `https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app${path}`;
-        return Array.from(new Set([relativePath, fullCurrentOrigin, devOrigin, preOrigin].filter(Boolean)));
-     }
-
      return Array.from(new Set([relativePath, fullCurrentOrigin].filter(Boolean)));
   };
 
@@ -870,10 +869,51 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 }
              };
 
-             const candidateModels = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+             const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro'];
              let clientErrorMsg = '';
 
-             for (const modelName of candidateModels) {
+             // First try official @google/genai Client SDK
+             try {
+                appendDebugLog(`📡 [AI Gemini Client SDK] Po startohet GoogleGenAI SDK...`);
+                const aiClient = new GoogleGenAI({ apiKey: activeApiKey.trim() });
+                for (const modelName of candidateModels) {
+                   try {
+                      appendDebugLog(`📡 [AI Gemini Client SDK] Po provohet model: ${modelName}`);
+                      const responseGen = await aiClient.models.generateContent({
+                         model: modelName,
+                         contents: parts,
+                         config: {
+                            systemInstruction,
+                            temperature: 0.2,
+                            responseMimeType: 'application/json'
+                         }
+                      });
+
+                      let rawText = responseGen.text || '{}';
+                      rawText = rawText.trim();
+                      if (rawText.startsWith('```')) {
+                         rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/```$/i, '').trim();
+                      }
+                      try {
+                         data = JSON.parse(rawText);
+                      } catch(pe) {
+                         data = { text: responseGen.text || 'Analiza u krye me sukses.' };
+                      }
+                      appendDebugLog(`✅ [AI Gemini Client SDK] Sukses me modelin: ${modelName}`);
+                      break;
+                   } catch(mErr: any) {
+                      console.warn(`Client SDK model ${modelName} failed:`, mErr);
+                      clientErrorMsg = mErr.message || String(mErr);
+                      appendDebugLog(`⚠️ [AI Gemini Client SDK] Modeli ${modelName} dështoi: ${clientErrorMsg}`);
+                   }
+                }
+             } catch(sdkErr: any) {
+                console.warn("SDK init failed:", sdkErr);
+                clientErrorMsg = sdkErr.message || String(sdkErr);
+             }
+
+             if (!data) {
+                for (const modelName of candidateModels) {
                 try {
                    appendDebugLog(`📡 [AI Gemini Direct REST] Po dërgohet te model ${modelName}...`);
                    const directUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(activeApiKey.trim())}`;
@@ -906,6 +946,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                    console.warn(`Direct Gemini REST model ${modelName} failed:`, e);
                    clientErrorMsg = e.message || 'Gabim lidhje me Google API';
                 }
+             }
+
              }
 
              if (!data && clientErrorMsg) {
