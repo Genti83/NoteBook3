@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getDirectoryHandle, saveDirectoryHandle } from '../lib/directoryFS';
-import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen, Terminal, Copy, CheckCheck } from 'lucide-react';
+import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen, Terminal, Copy, CheckCheck, Folder, User } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { useFirebase } from '../hooks/useFirebase';
 import { auth, db } from '../lib/firebase';
-import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, User, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, type User as FirebaseUser, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { collection, writeBatch, doc, setDoc, getDocs, getDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
@@ -2834,61 +2834,106 @@ export function Notepad() {
           </div>
       )}
 
-      {/* GOOGLE CLOUD ACCOUNT MODAL */}
+      {/* GOOGLE CLOUD ACCOUNT & DOCUMENT MANAGER MODAL */}
       {authModal && (
-          <div className="fixed inset-0 z-[100] flex items-start pt-12 pb-[30vh] md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
-             <div className={`max-w-md w-full p-6 mb-20 md:mb-0 rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
-                <div className="flex justify-between items-center mb-5">
-                   <h3 className={`text-xl font-bold flex items-center gap-2.5 ${textColor}`}>
-                      <Cloud className="w-6 h-6 text-emerald-500 animate-pulse" /> Llogaria Google Cloud Online
-                   </h3>
-                   <button onClick={() => setAuthModal(false)} className="p-2 bg-transparent text-zinc-500 hover:text-red-500 transition-colors">
+          <div className="fixed inset-0 z-[100] flex items-start pt-6 pb-12 md:items-center justify-center bg-black/70 p-3 sm:p-4 animate-in fade-in overflow-y-auto">
+             <div className={`max-w-2xl w-full p-5 sm:p-6 mb-16 md:mb-0 rounded-2xl shadow-2xl border flex flex-col gap-4 ${isDark ? "bg-zinc-900 border-zinc-700 text-zinc-100" : "bg-white border-zinc-300 text-zinc-900"}`} style={{ maxHeight: '90vh' }}>
+                {/* Header */}
+                <div className="flex justify-between items-center border-b border-zinc-800/60 pb-3">
+                   <div className="flex items-center gap-2.5">
+                      <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500">
+                         <Cloud className="w-6 h-6 animate-pulse" />
+                      </div>
+                      <div>
+                         <h3 className="text-lg sm:text-xl font-bold flex items-center gap-2">
+                            Platforma Google Cloud Online
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                               ONLINE 24/7
+                            </span>
+                         </h3>
+                         <p className="text-xs text-zinc-400">Menaxhimi i Llogarisë Google dhe Dokumenteve në Re</p>
+                      </div>
+                   </div>
+                   <button onClick={() => setAuthModal(false)} className="p-2 rounded-lg bg-transparent text-zinc-400 hover:text-red-500 hover:bg-zinc-800 transition-colors">
                       <X className="w-5 h-5"/>
                    </button>
                 </div>
 
-                <div className="flex flex-col gap-4">
-                   <div className={`p-4 rounded-xl border ${isDark ? "bg-zinc-950/80 border-emerald-500/30 text-zinc-200" : "bg-emerald-50/50 border-emerald-200 text-zinc-800"}`}>
-                      <div className="flex items-center gap-2 text-xs font-bold text-emerald-500 mb-1">
-                         <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping inline-block"></span>
-                         SISTEMI CLOUD ME SIGURI MAXIMAL
+                <div className="overflow-y-auto pr-1 space-y-4 scrollbar-hide">
+                   {/* Status Banner */}
+                   <div className={`p-3.5 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${isDark ? "bg-emerald-950/30 border-emerald-500/30" : "bg-emerald-50 border-emerald-200"}`}>
+                      <div className="flex items-start gap-3">
+                         <span className="relative flex h-3 w-3 mt-1 shrink-0">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                         </span>
+                         <div>
+                            <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                               Statusi: I Lidhur me Google Cloud Server
+                            </p>
+                            <p className="text-xs text-zinc-300 opacity-90 mt-0.5">
+                               Të gjitha fletët, sekretet dhe kodi PIN janë 100% të mbrojtura në re. Në rast dëmtimi apo humbjeje të telefonit, të gjitha rikthen me 1 klik.
+                            </p>
+                         </div>
                       </div>
-                      <p className="text-xs leading-relaxed opacity-90">
-                         Të gjitha dokumentet, shënimet sekrete dhe kodi PIN ruhen automatikisht në Google Cloud Server. Në rast se telefoni humbet apo prishet, me këtë e-mail mund t'i riktheni 100% të gjitha të dhënat!
-                      </p>
-                   </div>
-
-                   <div className="flex flex-col gap-1.5">
-                      <label className={`text-xs font-bold uppercase tracking-wider ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
-                         Adresa e Llogarisë tuaj Google:
-                      </label>
-                      <input
-                         type="email"
-                         value={email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com'}
-                         onChange={(e) => {
-                            const val = e.target.value;
-                            setEmail(val);
-                            localStorage.setItem('grid_notepad_saved_email', val);
+                      <button
+                         onClick={async () => {
+                            showToast("Po sinkronizohet me serverin Google Cloud...");
+                            await syncWithGoogleCloud(documents, false);
                          }}
-                         placeholder="Adresa e-mail Google (p.sh. genti8319@gmail.com)"
-                         className={`w-full px-4 py-3 rounded-xl border text-sm font-semibold outline-none transition-colors ${
-                             isDark ? "bg-zinc-950 border-zinc-700 text-white focus:border-emerald-500" : "bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-emerald-500"
-                         }`}
-                      />
+                         className="shrink-0 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-all shadow-md shadow-emerald-600/20 flex items-center gap-1.5"
+                      >
+                         <RefreshCw className="w-3.5 h-3.5" /> Auto-Sync Tani
+                      </button>
                    </div>
 
-                   <div className="grid grid-cols-1 gap-2.5 mt-1">
+                   {/* Google Account Connection Input */}
+                   <div className={`p-4 rounded-xl border space-y-3 ${isDark ? "bg-zinc-950/80 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+                      <label className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
+                         <User className="w-4 h-4" /> Llogaria Google me Akses në Cloud
+                      </label>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                         <input
+                            type="email"
+                            value={email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com'}
+                            onChange={(e) => {
+                               const val = e.target.value;
+                               setEmail(val);
+                               localStorage.setItem('grid_notepad_saved_email', val);
+                            }}
+                            placeholder="Adresa e-mail Google (p.sh. genti8319@gmail.com)"
+                            className={`flex-1 px-3.5 py-2.5 rounded-xl border text-sm font-semibold outline-none transition-colors ${
+                                isDark ? "bg-zinc-900 border-zinc-700 text-white focus:border-emerald-500" : "bg-white border-zinc-300 text-zinc-900 focus:border-emerald-500"
+                            }`}
+                         />
+                         <button
+                            type="button"
+                            onClick={async () => {
+                               const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
+                               localStorage.setItem('grid_notepad_saved_email', mail);
+                               showToast("Llogaria u lidh me sukses! Po marrim të dhënat...");
+                               await loadFromGoogleCloud(false);
+                            }}
+                            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-2 shrink-0"
+                         >
+                            <Check className="w-4 h-4" /> Lidhu & Lejo Qasjen
+                         </button>
+                      </div>
+                   </div>
+
+                   {/* Quick Master Controls */}
+                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <button 
                          type="button" 
                          onClick={async () => {
                             const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
                             localStorage.setItem('grid_notepad_saved_email', mail);
-                            showToast("Po dërgohen të dhënat në Google Cloud...");
+                            showToast("Po ruhen të gjitha dokumentet në Google Cloud...");
                             await syncWithGoogleCloud(documents, false);
                          }} 
-                         className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 text-sm"
+                         className="py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 text-xs sm:text-sm"
                       >
-                         <Cloud className="w-5 h-5" /> ⚡ Sinkronizo / Ruaj Tani në Cloud
+                         <Cloud className="w-4 h-4" /> ⚡ Ruaj & Sinkronizo të Gjitha në Cloud
                       </button>
 
                       <button 
@@ -2896,23 +2941,105 @@ export function Notepad() {
                          onClick={async () => {
                             const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
                             localStorage.setItem('grid_notepad_saved_email', mail);
-                            showToast("Po shkarkohen dokumentet tuaja nga Cloud...");
+                            showToast("Po shkarkohen të gjitha dokumentet nga Cloud...");
                             await loadFromGoogleCloud(false);
                          }} 
-                         className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 text-sm"
+                         className="py-3 px-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 text-xs sm:text-sm"
                       >
-                         <Download className="w-5 h-5" /> 📥 Importo Dokumentet nga Cloud
+                         <Download className="w-4 h-4" /> 📥 Importo & Rikthe Dokumentet
                       </button>
                    </div>
 
-                   <div className="flex items-center justify-between pt-2 border-t border-zinc-800">
-                      <button type="button" onClick={() => setDebugLogsModal(true)} className="text-xs text-emerald-400 hover:underline flex items-center gap-1 font-mono">
-                         <Terminal className="w-3.5 h-3.5" /> Logcat Console / Diagnostikimi
-                      </button>
-                      <button type="button" onClick={() => setAuthModal(false)} className="text-xs text-zinc-400 hover:text-white">
-                         Mbyll
-                      </button>
+                   {/* Online Documents Explorer Section */}
+                   <div className={`p-4 rounded-xl border flex flex-col gap-3 ${isDark ? "bg-zinc-950/60 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+                      <div className="flex items-center justify-between">
+                         <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
+                            <Folder className="w-4 h-4 text-emerald-400" />
+                            Dokumentet Tuaja Online në Google Cloud ({documents.length})
+                         </h4>
+                         <button 
+                            type="button"
+                            onClick={async () => {
+                               showToast("Po rifreskohet lista nga Cloud...");
+                               await loadFromGoogleCloud(true);
+                            }}
+                            className="text-xs text-emerald-400 hover:underline font-semibold flex items-center gap-1"
+                         >
+                            <RefreshCw className="w-3 h-3" /> Rifresko Listën
+                         </button>
+                      </div>
+
+                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1 scrollbar-hide">
+                         {documents.length === 0 ? (
+                            <div className="p-6 text-center text-xs text-zinc-500 border border-dashed rounded-xl">
+                               Nuk ka asnjë dokument. Krijoni shënime në notebook dhe ato do të shfaqen automatikisht këtu!
+                            </div>
+                         ) : (
+                            documents.map((docItem) => {
+                               const rowCount = docItem.rows ? docItem.rows.length : 0;
+                               return (
+                                  <div 
+                                     key={docItem.id} 
+                                     className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-colors ${
+                                        isDark ? "bg-zinc-900/90 border-zinc-800 hover:border-emerald-500/40" : "bg-white border-zinc-200 hover:border-emerald-400"
+                                     }`}
+                                  >
+                                     <div className="flex items-center gap-2.5 min-w-0">
+                                        <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-sm shrink-0">
+                                           {docItem.title ? docItem.title.charAt(0).toUpperCase() : '📄'}
+                                        </div>
+                                        <div className="min-w-0">
+                                           <p className="text-xs font-bold truncate text-white">
+                                              {docItem.title || 'Dokument pa titull'}
+                                           </p>
+                                           <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-0.5">
+                                              <span>{rowCount} rrjeshta/të dhëna</span>
+                                              <span>•</span>
+                                              <span className="text-emerald-400 font-mono">Në Cloud</span>
+                                           </div>
+                                        </div>
+                                     </div>
+
+                                     <div className="flex items-center gap-1.5 shrink-0">
+                                        <button
+                                           type="button"
+                                           onClick={() => {
+                                              setActiveDocId(docItem.id);
+                                              setRows(docItem.rows);
+                                              setHeaders(docItem.headers);
+                                              setTitle(docItem.title);
+                                              showToast(`U hap dokumenti: "${docItem.title}"`);
+                                              setAuthModal(false);
+                                           }}
+                                           className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 font-bold text-[11px] rounded-lg transition-colors"
+                                        >
+                                           Hape
+                                        </button>
+                                     </div>
+                                  </div>
+                               );
+                            })
+                         )}
+                      </div>
                    </div>
+                </div>
+
+                {/* Footer Controls */}
+                <div className="flex items-center justify-between pt-3 border-t border-zinc-800/80 mt-1">
+                   <button 
+                      type="button" 
+                      onClick={() => setDebugLogsModal(true)} 
+                      className="text-xs text-emerald-400 hover:underline flex items-center gap-1.5 font-mono"
+                   >
+                      <Terminal className="w-3.5 h-3.5" /> Logcat Console / Diagnostikimi
+                   </button>
+                   <button 
+                      type="button" 
+                      onClick={() => setAuthModal(false)} 
+                      className="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-xs rounded-xl transition-colors"
+                   >
+                      Mbyll
+                   </button>
                 </div>
              </div>
           </div>
