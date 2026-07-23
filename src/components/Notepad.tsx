@@ -861,7 +861,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 }
              };
 
-             const candidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+             const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
 
              // First try official @google/genai Client SDK
              try {
@@ -954,7 +954,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
              if (clientErrorMsg) {
                 throw new Error(`Gabim nga Google Gemini API: ${clientErrorMsg}`);
              } else if (!activeApiKey) {
-                throw new Error("Nuk u arrit lidhja me serverin e AI Gemini. Ju lutem kontrolloni lidhjen e internetit tuaj.");
+                setShowKeyConfig(true);
+                throw new Error("⚠️ Nuk u arrit lidhja me serverin e AI (APK/Offline) dhe nuk keni vendosur një Gemini API Key personale. Ju lutem merrni një çelës falas në Google AI Studio dhe vendoseni te cilësimet (ikona ⚙️).");
              } else {
                 throw new Error(lastErrMessage || "Nuk u arrit lidhja me AI Gemini. Ju lutem kontrolloni lidhjen tuaj.");
              }
@@ -3619,7 +3620,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono">APK / Direct</span>
                    </div>
                    <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-tight">
-                      Vendosni Gemini API Key për të garantuar punën e AI direkt nga telefoni në APK.
+                      Vendosni Gemini API Key për të garantuar punën e AI direkt nga telefoni në APK. Mund të merrni një çelës falas (Free API Key) te <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="text-amber-600 dark:text-amber-400 underline font-bold">Google AI Studio</a>.
                    </p>
                    <div className="flex items-center gap-2 mt-1">
                       <input
