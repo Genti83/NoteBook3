@@ -1608,6 +1608,14 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
   }, [documents]);
 
   useEffect(() => {
+     if (activeDocId) {
+        localStorage.setItem('grid_notepad_active_doc_id', activeDocId);
+     } else {
+        localStorage.removeItem('grid_notepad_active_doc_id');
+     }
+  }, [activeDocId]);
+
+  useEffect(() => {
     const savedDocs = localStorage.getItem('grid_notepad_documents_v2');
     const savedTheme = localStorage.getItem('grid_notepad_theme');
     const savedAccent = localStorage.getItem('grid_notepad_accent') as keyof typeof COLOR_THEMES;
@@ -1619,7 +1627,36 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
     // Initial theme setup handled by the new themeSync useEffect
     
     if (savedDocs) {
-       setDocuments(JSON.parse(savedDocs));
+       const parsedDocs = JSON.parse(savedDocs);
+       setDocuments(parsedDocs);
+       
+       const lastActiveDocId = localStorage.getItem('grid_notepad_active_doc_id');
+       if (lastActiveDocId) {
+          const matchedDoc = parsedDocs.find((d: any) => d.id === lastActiveDocId);
+          if (matchedDoc) {
+             setActiveDocId(matchedDoc.id);
+             setTitle(matchedDoc.title);
+             setActiveTags(matchedDoc.tags || []);
+             setHeaders(matchedDoc.headers);
+             setColumnWidths(matchedDoc.columnWidths || []);
+             
+             const newRows = [...matchedDoc.rows];
+             const hasContent = (r: GridRow) => (matchedDoc.headers.some((_, i) => (r[`col${i+1}`] || '').toString().trim()) || r.image) ? true : false;
+             if (newRows.length > 0) {
+                 const firstRowIsUsed = hasContent(newRows[0]) || (newRows[0].status && newRows[0].status !== 'none');
+                 if (firstRowIsUsed) {
+                     const firstEmptyIndex = newRows.findIndex(r => !hasContent(r) && r.status === 'none' && !r.image);
+                     if (firstEmptyIndex !== -1) {
+                         const emptyRow = newRows.splice(firstEmptyIndex, 1)[0];
+                         newRows.unshift(emptyRow);
+                     } else {
+                         newRows.unshift({ id: `row-${Date.now()}-first`, status: 'none', image: '' });
+                     }
+                 }
+             }
+             setRows(newRows);
+          }
+       }
     } else {
        // Migrate from older version if exists
        const oldRows = localStorage.getItem('grid_notepad_rows');
