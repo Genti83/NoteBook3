@@ -657,12 +657,11 @@ export function Notepad() {
        
        const payload = JSON.stringify({ prompt: promptText, documents: docsForAi, activeDocId, image: aiChatImage, audio: aiChatAudio });
        
-       const endpoints: string[] = [];
+       const endpoints: string[] = ['/api/ai/chat'];
        if (Capacitor.isNativePlatform()) {
-          endpoints.push('https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat');
           endpoints.push('https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat');
+          endpoints.push('https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat');
        }
-       endpoints.push('/api/ai/chat');
 
        let response: Response | null = null;
        let lastErrMessage = '';
@@ -670,18 +669,24 @@ export function Notepad() {
        for (const ep of endpoints) {
           appendDebugLog(`📡 [AI Gemini] Po provohet lidhja me endpoint: ${ep}`);
           try {
-             response = await fetch(ep, {
+             const res = await fetch(ep, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: payload
              });
-             if (response.ok) {
-                appendDebugLog(`✅ [AI Gemini] Lidhja u krye me sukses (HTTP ${response.status}) te: ${ep}`);
+             const contentType = res.headers.get('content-type') || '';
+             if (res.ok && contentType.includes('application/json')) {
+                response = res;
+                appendDebugLog(`✅ [AI Gemini] Lidhja me JSON u krye me sukses (HTTP ${res.status}) te: ${ep}`);
                 break;
+             } else if (res.ok) {
+                lastErrMessage = `Endpoint ${ep} ktheu HTML (SPA Fallback) dhe jo JSON.`;
+                appendDebugLog(`⚠️ [AI Gemini] Endpoint ${ep} ktheu HTML (SPA Fallback). Po provohet tjetri...`);
+             } else {
+                const errJson = await res.json().catch(() => ({}));
+                lastErrMessage = errJson.error || res.statusText;
+                appendDebugLog(`⚠️ [AI Gemini] Status jo-ok (${res.status}) nga ${ep}: ${lastErrMessage}`);
              }
-             const errJson = await response.json().catch(() => ({}));
-             lastErrMessage = errJson.error || response.statusText;
-             appendDebugLog(`⚠️ [AI Gemini] Status jo-ok (${response.status}) nga ${ep}: ${lastErrMessage}`);
           } catch(e: any) {
              console.warn("AI chat endpoint error:", ep, e);
              lastErrMessage = e.message || "Bllokim i rrjetit / CORS";
@@ -806,12 +811,11 @@ export function Notepad() {
       pin: localStorage.getItem('grid_notepad_pin') || null
     });
 
-    const endpoints = [];
+    const endpoints = ['/api/cloud/sync'];
     if (Capacitor.isNativePlatform()) {
-      endpoints.push('https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/sync');
       endpoints.push('https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/sync');
+      endpoints.push('https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/sync');
     }
-    endpoints.push('/api/cloud/sync');
 
     let success = false;
     for (const ep of endpoints) {
@@ -822,10 +826,13 @@ export function Notepad() {
           headers: { 'Content-Type': 'application/json' },
           body: payload
         });
-        if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
           success = true;
           appendDebugLog(`✅ [Google Cloud Sync] Ruajtja u krye me sukses në Google Cloud (HTTP ${res.status}) te: ${ep}`);
           break;
+        } else if (res.ok) {
+          appendDebugLog(`⚠️ [Google Cloud Sync] Endpoint ${ep} ktheu HTML (SPA Fallback) e jo JSON. Po provohet tjetri...`);
         } else {
           appendDebugLog(`⚠️ [Google Cloud Sync] Status jo-ok (${res.status}) nga ${ep}`);
         }
@@ -850,19 +857,19 @@ export function Notepad() {
     const uid = getActiveUid() || 'genti8319@gmail.com';
     appendDebugLog(`☁️ [Google Cloud Load] Po shkarkohen dokumentet nga serveri për: ${uid}`);
 
-    const endpoints = [];
+    const endpoints = [`/api/cloud/load?userId=${encodeURIComponent(uid)}`];
     if (Capacitor.isNativePlatform()) {
-      endpoints.push(`https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/load?userId=${encodeURIComponent(uid)}`);
       endpoints.push(`https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/load?userId=${encodeURIComponent(uid)}`);
+      endpoints.push(`https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/load?userId=${encodeURIComponent(uid)}`);
     }
-    endpoints.push(`/api/cloud/load?userId=${encodeURIComponent(uid)}`);
 
     let loadedData: any = null;
     for (const ep of endpoints) {
       appendDebugLog(`📡 [Google Cloud Load] Po kërkohet nga endpoint: ${ep}`);
       try {
         const res = await fetch(ep);
-        if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
           const json = await res.json();
           if (json.documents && json.documents.length > 0) {
             loadedData = json;
@@ -871,6 +878,8 @@ export function Notepad() {
           } else {
              appendDebugLog(`ℹ️ [Google Cloud Load] Përgjigje me sukses por nuk u gjetën dokumente për ${uid}`);
           }
+        } else if (res.ok) {
+           appendDebugLog(`⚠️ [Google Cloud Load] Endpoint ${ep} ktheu HTML e jo JSON. Po provohet tjetri...`);
         } else {
            appendDebugLog(`⚠️ [Google Cloud Load] Status jo-ok (${res.status}) nga ${ep}`);
         }
