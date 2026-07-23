@@ -483,6 +483,96 @@ export function Notepad() {
   const [cloudDocs, setCloudDocs] = useState<GridDocument[]>([]);
   const [isFetchingCloud, setIsFetchingCloud] = useState(false);
 
+  const [selectedCloudDocIds, setSelectedCloudDocIds] = useState<string[]>([]);
+  const [previewModalDoc, setPreviewModalDoc] = useState<GridDocument | null>(null);
+  const [fullViewDoc, setFullViewDoc] = useState<GridDocument | null>(null);
+  const fileInputBackupRef = useRef<HTMLInputElement | null>(null);
+
+  const handleUnifiedCloudSync = async () => {
+     const mail = (email || localStorage.getItem('grid_notepad_saved_email') || localStorage.getItem('grid_notepad_user_account') || 'genti8319@gmail.com').trim();
+     localStorage.setItem('grid_notepad_saved_email', mail);
+     localStorage.setItem('grid_notepad_user_account', mail);
+     showToast("⚡ Po sinkronizohen dhe përditësohen të dhënat me Google Cloud...");
+     const synced = await syncWithGoogleCloud(documents, true);
+     await loadFromGoogleCloud(true);
+     if (synced) {
+        showToast("⚡ Sinkronizimi me Google Cloud u krye me sukses 100%!");
+     } else {
+        showToast("Të dhënat u ruajtën lokalisht në pajisje.");
+     }
+  };
+
+  const handleSelectAllCloudDocs = () => {
+     if (selectedCloudDocIds.length === documents.length && documents.length > 0) {
+        setSelectedCloudDocIds([]);
+     } else {
+        setSelectedCloudDocIds(documents.map(d => d.id));
+     }
+  };
+
+  const handleDeleteSelectedCloudDocs = async (docIdToDelete?: string) => {
+     const idsToDelete = docIdToDelete ? [docIdToDelete] : selectedCloudDocIds;
+     if (idsToDelete.length === 0) {
+        showToast("Zgjidhni të paktën një dokument për ta fshirë.");
+        return;
+     }
+     if (!confirm(`Jeni të sigurt që dëshironi të fshini ${idsToDelete.length} dokument(e) nga Cloud dhe notebook?`)) return;
+
+     const newDocs = documents.filter(d => !idsToDelete.includes(d.id));
+     setDocuments(newDocs);
+     setSelectedCloudDocIds([]);
+     localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(newDocs));
+
+     if (activeDocId && idsToDelete.includes(activeDocId)) {
+        if (newDocs.length > 0) openDocument(newDocs[0]);
+        else createNewDocument();
+     }
+
+     showToast("Dokumentet u fshinë. Po përditësohet Google Cloud...");
+     await syncWithGoogleCloud(newDocs, false);
+  };
+
+  const handleExportBackup = (docToExport?: GridDocument) => {
+     const exportData = docToExport ? [docToExport] : (selectedCloudDocIds.length > 0 ? documents.filter(d => selectedCloudDocIds.includes(d.id)) : documents);
+     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+     const downloadAnchor = document.createElement('a');
+     downloadAnchor.setAttribute("href", dataStr);
+     downloadAnchor.setAttribute("download", `notebook_cloud_backup_${new Date().toISOString().slice(0, 10)}.json`);
+     document.body.appendChild(downloadAnchor);
+     downloadAnchor.click();
+     downloadAnchor.remove();
+     showToast("Eksportimi i backup-it u përfundua me sukses!");
+  };
+
+  const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+     const file = e.target.files?.[0];
+     if (!file) return;
+     const reader = new FileReader();
+     reader.onload = async (event) => {
+        try {
+           const content = event.target?.result as string;
+           const parsed = JSON.parse(content);
+           if (Array.isArray(parsed) && parsed.length > 0) {
+              const mergedMap = new Map<string, GridDocument>();
+              documents.forEach(d => mergedMap.set(d.id, d));
+              parsed.forEach((d: any) => {
+                 if (d && d.id) mergedMap.set(d.id, d);
+              });
+              const updated = Array.from(mergedMap.values());
+              setDocuments(updated);
+              localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(updated));
+              showToast(`U importuan me sukses ${parsed.length} dokumente! Po sinkronizohen në Cloud...`);
+              await syncWithGoogleCloud(updated, false);
+           } else {
+              showToast("Skedar backup i pavlefshëm.");
+           }
+        } catch (err) {
+           showToast("Gabim gjatë leximit të skedarit backup.");
+        }
+     };
+     reader.readAsText(file);
+  };
+
   const [aiChatModal, setAiChatModal] = useState(false);
   const [aiChatInput, setAiChatInput] = useState(() => localStorage.getItem('grid_aichat_input') || '');
   const [aiChatResponse, setAiChatResponse] = useState('');
@@ -504,7 +594,21 @@ export function Notepad() {
   };
 
   const getActiveUid = () => {
-     return user?.uid || user?.email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com';
+     return user?.uid || user?.email || localStorage.getItem('grid_notepad_saved_email') || localStorage.getItem('grid_notepad_user_account') || 'genti8319@gmail.com';
+  };
+
+  const getApiEndpoints = (path: string): string[] => {
+     const currentOrigin = typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.startsWith('http')
+       ? window.location.origin
+       : '';
+
+     const relativePath = path;
+     const fullCurrentOrigin = currentOrigin ? `${currentOrigin}${path}` : '';
+     const devOrigin = `https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app${path}`;
+     const preOrigin = `https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app${path}`;
+
+     const endpoints = [relativePath, fullCurrentOrigin, devOrigin, preOrigin].filter(Boolean);
+     return Array.from(new Set(endpoints));
   };
 
   useEffect(() => {
@@ -657,13 +761,7 @@ export function Notepad() {
        
        const payload = JSON.stringify({ prompt: promptText, documents: docsForAi, activeDocId, image: aiChatImage, audio: aiChatAudio });
        
-       const endpoints: string[] = Capacitor.isNativePlatform()
-          ? [
-             'https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat',
-             'https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/ai/chat',
-             '/api/ai/chat'
-            ]
-          : ['/api/ai/chat'];
+       const endpoints = getApiEndpoints('/api/ai/chat');
 
        let response: Response | null = null;
        let lastErrMessage = '';
@@ -813,13 +911,7 @@ export function Notepad() {
       pin: localStorage.getItem('grid_notepad_pin') || null
     });
 
-    const endpoints = Capacitor.isNativePlatform()
-      ? [
-          'https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/sync',
-          'https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/sync',
-          '/api/cloud/sync'
-        ]
-      : ['/api/cloud/sync'];
+    const endpoints = getApiEndpoints('/api/cloud/sync');
 
     let success = false;
     for (const ep of endpoints) {
@@ -861,13 +953,7 @@ export function Notepad() {
     const uid = getActiveUid() || 'genti8319@gmail.com';
     appendDebugLog(`☁️ [Google Cloud Load] Po shkarkohen dokumentet nga serveri për: ${uid}`);
 
-    const endpoints = Capacitor.isNativePlatform()
-      ? [
-          `https://ais-dev-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/load?userId=${encodeURIComponent(uid)}`,
-          `https://ais-pre-dva77knoqcna5xt4l6qx7i-4359193177.europe-west1.run.app/api/cloud/load?userId=${encodeURIComponent(uid)}`,
-          `/api/cloud/load?userId=${encodeURIComponent(uid)}`
-        ]
-      : [`/api/cloud/load?userId=${encodeURIComponent(uid)}`];
+    const endpoints = getApiEndpoints(`/api/cloud/load?userId=${encodeURIComponent(uid)}`);
 
     let loadedData: any = null;
     for (const ep of endpoints) {
@@ -1296,9 +1382,9 @@ export function Notepad() {
       localSaveTimeout.current = setTimeout(() => {
           localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(updatedDocs));
           pendingLocalSaveRef.current = false;
-      }, 500);
+      }, 300);
 
-      const freq = parseInt(localStorage.getItem('grid_cloud_sync_freq') || '5000', 10);
+      const freq = parseInt(localStorage.getItem('grid_cloud_sync_freq') || '3000', 10);
       if (freq === -1) return; // Off
 
       setIsSaving(true);
@@ -1306,30 +1392,11 @@ export function Notepad() {
       
       if (autoSaveTimeout.current) clearTimeout(autoSaveTimeout.current);
       autoSaveTimeout.current = setTimeout(async () => {
-         const currentUser = auth.currentUser;
-         // Auto save (AI/Sync) to cloud if online and logged in
-         if (currentUser && activeDocId && navigator.onLine) {
-            const currentDoc = updatedDocs.find(d => d.id === activeDocId);
-            if (currentDoc) {
-               try {
-                  const docRef = doc(db, 'documents', currentDoc.id);
-                  await setDoc(docRef, { ...currentDoc, userId: getActiveUid()! });
-                  setCloudDocs(prev => {
-                     const idx = prev.findIndex(c => c.id === currentDoc.id);
-                     if (idx >= 0) {
-                         const n = [...prev];
-                         n[idx] = { ...currentDoc, userId: getActiveUid()! } as any;
-                         return n;
-                     }
-                     return prev;
-                  });
-               } catch (e) {
-                  console.error("Cloud autosave warning", e);
-               }
-            }
+         if (navigator.onLine) {
+            await syncWithGoogleCloud(updatedDocs, true);
          }
          setIsSaving(false);
-         setAutoSaveMsg('Ruajtur (AI)');
+         setAutoSaveMsg('Ruajtur në Cloud');
          setTimeout(() => setAutoSaveMsg(''), 2000);
       }, freq);
   };
@@ -1363,6 +1430,15 @@ export function Notepad() {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
+
+  useEffect(() => {
+     const handleOnline = () => {
+        showToast("📶 Lidhja me Internet u rikthye! Po sinkronizohen dokumentet me Google Cloud...");
+        syncWithGoogleCloud(documents, true);
+     };
+     window.addEventListener('online', handleOnline);
+     return () => window.removeEventListener('online', handleOnline);
+  }, [documents]);
 
   useEffect(() => {
     const savedDocs = localStorage.getItem('grid_notepad_documents_v2');
@@ -2836,12 +2912,13 @@ export function Notepad() {
 
       {/* GOOGLE CLOUD ACCOUNT & DOCUMENT MANAGER MODAL */}
       {authModal && (
-          <div className="fixed inset-0 z-[100] flex items-start pt-6 pb-12 md:items-center justify-center bg-black/70 p-3 sm:p-4 animate-in fade-in overflow-y-auto">
-             <div className={`max-w-2xl w-full p-5 sm:p-6 mb-16 md:mb-0 rounded-2xl shadow-2xl border flex flex-col gap-4 ${isDark ? "bg-zinc-900 border-zinc-700 text-zinc-100" : "bg-white border-zinc-300 text-zinc-900"}`} style={{ maxHeight: '90vh' }}>
+          <div className="fixed inset-0 z-[100] flex items-start pt-4 pb-12 md:items-center justify-center bg-black/75 p-3 sm:p-4 animate-in fade-in overflow-y-auto">
+             <div className={`max-w-3xl w-full p-4 sm:p-6 mb-16 md:mb-0 rounded-2xl shadow-2xl border flex flex-col gap-4 ${isDark ? "bg-zinc-900 border-zinc-700 text-zinc-100" : "bg-white border-zinc-300 text-zinc-900"}`} style={{ maxHeight: '92vh' }}>
+                
                 {/* Header */}
-                <div className="flex justify-between items-center border-b border-zinc-800/60 pb-3">
+                <div className="flex justify-between items-center border-b border-zinc-800/80 pb-3">
                    <div className="flex items-center gap-2.5">
-                      <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500">
+                      <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500">
                          <Cloud className="w-6 h-6 animate-pulse" />
                       </div>
                       <div>
@@ -2851,7 +2928,7 @@ export function Notepad() {
                                ONLINE 24/7
                             </span>
                          </h3>
-                         <p className="text-xs text-zinc-400">Menaxhimi i Llogarisë Google dhe Dokumenteve në Re</p>
+                         <p className="text-xs text-zinc-400">Menaxhimi i Llogarisë Google dhe Dokumenteve tuaja në Re</p>
                       </div>
                    </div>
                    <button onClick={() => setAuthModal(false)} className="p-2 rounded-lg bg-transparent text-zinc-400 hover:text-red-500 hover:bg-zinc-800 transition-colors">
@@ -2860,7 +2937,7 @@ export function Notepad() {
                 </div>
 
                 <div className="overflow-y-auto pr-1 space-y-4 scrollbar-hide">
-                   {/* Status Banner */}
+                   {/* Status Banner & Unified Single Sync Button */}
                    <div className={`p-3.5 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${isDark ? "bg-emerald-950/30 border-emerald-500/30" : "bg-emerald-50 border-emerald-200"}`}>
                       <div className="flex items-start gap-3">
                          <span className="relative flex h-3 w-3 mt-1 shrink-0">
@@ -2872,18 +2949,18 @@ export function Notepad() {
                                Statusi: I Lidhur me Google Cloud Server
                             </p>
                             <p className="text-xs text-zinc-300 opacity-90 mt-0.5">
-                               Të gjitha fletët, sekretet dhe kodi PIN janë 100% të mbrojtura në re. Në rast dëmtimi apo humbjeje të telefonit, të gjitha rikthen me 1 klik.
+                               Llogaria juaj është e lidhur përgjithmonë. Të gjitha fletët, shënimet, sekretet dhe kodi PIN ruhen automatikisht edhe offline!
                             </p>
                          </div>
                       </div>
+
+                      {/* Unified Single Master Button */}
                       <button
-                         onClick={async () => {
-                            showToast("Po sinkronizohet me serverin Google Cloud...");
-                            await syncWithGoogleCloud(documents, false);
-                         }}
-                         className="shrink-0 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-all shadow-md shadow-emerald-600/20 flex items-center gap-1.5"
+                         type="button"
+                         onClick={handleUnifiedCloudSync}
+                         className="w-full sm:w-auto shrink-0 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2"
                       >
-                         <RefreshCw className="w-3.5 h-3.5" /> Auto-Sync Tani
+                         <RefreshCw className="w-4 h-4 animate-spin-slow" /> ⚡ Sinkronizo & Rifresko Tani (Cloud Sync)
                       </button>
                    </div>
 
@@ -2900,9 +2977,10 @@ export function Notepad() {
                                const val = e.target.value;
                                setEmail(val);
                                localStorage.setItem('grid_notepad_saved_email', val);
+                               localStorage.setItem('grid_notepad_user_account', val);
                             }}
                             placeholder="Adresa e-mail Google (p.sh. genti8319@gmail.com)"
-                            className={`flex-1 px-3.5 py-2.5 rounded-xl border text-sm font-semibold outline-none transition-colors ${
+                            className={`flex-1 px-3.5 py-2 rounded-xl border text-sm font-semibold outline-none transition-colors ${
                                 isDark ? "bg-zinc-900 border-zinc-700 text-white focus:border-emerald-500" : "bg-white border-zinc-300 text-zinc-900 focus:border-emerald-500"
                             }`}
                          />
@@ -2911,65 +2989,137 @@ export function Notepad() {
                             onClick={async () => {
                                const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
                                localStorage.setItem('grid_notepad_saved_email', mail);
-                               showToast("Llogaria u lidh me sukses! Po marrim të dhënat...");
-                               await loadFromGoogleCloud(false);
+                               localStorage.setItem('grid_notepad_user_account', mail);
+                               showToast("Llogaria u ruajt përgjithmonë! Po sinkronizohen të dhënat...");
+                               await handleUnifiedCloudSync();
                             }}
-                            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-2 shrink-0"
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 shrink-0"
                          >
-                            <Check className="w-4 h-4" /> Lidhu & Lejo Qasjen
+                            <Check className="w-4 h-4" /> Ruaj Llogarinë & Lidhu
                          </button>
                       </div>
                    </div>
 
-                   {/* Quick Master Controls */}
-                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <button 
-                         type="button" 
-                         onClick={async () => {
-                            const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
-                            localStorage.setItem('grid_notepad_saved_email', mail);
-                            showToast("Po ruhen të gjitha dokumentet në Google Cloud...");
-                            await syncWithGoogleCloud(documents, false);
-                         }} 
-                         className="py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 text-xs sm:text-sm"
-                      >
-                         <Cloud className="w-4 h-4" /> ⚡ Ruaj & Sinkronizo të Gjitha në Cloud
-                      </button>
+                   {/* Document Action Control Bar - EDITOR, SAVE, PREVIEW, FULLVIEW, IMPORTBACKUP, EXPORT, SELECT ALL ONE, DELETE */}
+                   <div className={`p-3.5 rounded-xl border space-y-3 ${isDark ? "bg-zinc-950/80 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                         <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
+                            <Folder className="w-4 h-4" />
+                            Menaxhimi i Dokumenteve Online ({documents.length})
+                         </span>
+                         <span className="text-[11px] text-zinc-400 font-mono">
+                            Zgjedhur: {selectedCloudDocIds.length} / {documents.length}
+                         </span>
+                      </div>
 
-                      <button 
-                         type="button" 
-                         onClick={async () => {
-                            const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
-                            localStorage.setItem('grid_notepad_saved_email', mail);
-                            showToast("Po shkarkohen të gjitha dokumentet nga Cloud...");
-                            await loadFromGoogleCloud(false);
-                         }} 
-                         className="py-3 px-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 text-xs sm:text-sm"
-                      >
-                         <Download className="w-4 h-4" /> 📥 Importo & Rikthe Dokumentet
-                      </button>
-                   </div>
+                      {/* Toolbar Buttons */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                         <button
+                            type="button"
+                            onClick={handleSelectAllCloudDocs}
+                            className={`py-2 px-3 rounded-lg border text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                               selectedCloudDocIds.length === documents.length && documents.length > 0
+                                  ? "bg-emerald-600 text-white border-emerald-500"
+                                  : (isDark ? "bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700" : "bg-white border-zinc-300 text-zinc-700 hover:bg-zinc-100")
+                            }`}
+                         >
+                            <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
+                            {selectedCloudDocIds.length === documents.length && documents.length > 0 ? "DESELECT ALL" : "SELECT ALL ONE"}
+                         </button>
 
-                   {/* Online Documents Explorer Section */}
-                   <div className={`p-4 rounded-xl border flex flex-col gap-3 ${isDark ? "bg-zinc-950/60 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
-                      <div className="flex items-center justify-between">
-                         <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
-                            <Folder className="w-4 h-4 text-emerald-400" />
-                            Dokumentet Tuaja Online në Google Cloud ({documents.length})
-                         </h4>
-                         <button 
+                         <button
+                            type="button"
+                            onClick={() => {
+                               if (selectedCloudDocIds.length === 1) {
+                                  const docToOpen = documents.find(d => d.id === selectedCloudDocIds[0]);
+                                  if (docToOpen) {
+                                     openDocument(docToOpen);
+                                     showToast(`U hap në Editor: "${docToOpen.title}"`);
+                                     setAuthModal(false);
+                                  }
+                               } else if (documents.length > 0) {
+                                  const docToOpen = documents.find(d => d.id === activeDocId) || documents[0];
+                                  openDocument(docToOpen);
+                                  showToast(`U hap në Editor: "${docToOpen.title}"`);
+                                  setAuthModal(false);
+                               } else {
+                                  showToast("Nuk ka asnjë dokument për të hapur.");
+                               }
+                            }}
+                            className="py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                         >
+                            <FileText className="w-3.5 h-3.5" /> EDITOR
+                         </button>
+
+                         <button
                             type="button"
                             onClick={async () => {
-                               showToast("Po rifreskohet lista nga Cloud...");
-                               await loadFromGoogleCloud(true);
+                               showToast("Po ruhet dokumenti aktual në Cloud...");
+                               await syncWithGoogleCloud(documents, false);
                             }}
-                            className="text-xs text-emerald-400 hover:underline font-semibold flex items-center gap-1"
+                            className="py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
                          >
-                            <RefreshCw className="w-3 h-3" /> Rifresko Listën
+                            <Save className="w-3.5 h-3.5" /> SAVE
+                         </button>
+
+                         <button
+                            type="button"
+                            onClick={() => {
+                               const docToPreview = selectedCloudDocIds.length > 0 ? documents.find(d => d.id === selectedCloudDocIds[0]) : (documents.find(d => d.id === activeDocId) || documents[0]);
+                               if (docToPreview) setPreviewModalDoc(docToPreview);
+                               else showToast("Nuk ka dokument për PREVIEW");
+                            }}
+                            className="py-2 px-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                         >
+                            <Eye className="w-3.5 h-3.5" /> PREVIEW
+                         </button>
+
+                         <button
+                            type="button"
+                            onClick={() => {
+                               const docToFull = selectedCloudDocIds.length > 0 ? documents.find(d => d.id === selectedCloudDocIds[0]) : (documents.find(d => d.id === activeDocId) || documents[0]);
+                               if (docToFull) setFullViewDoc(docToFull);
+                               else showToast("Nuk ka dokument për FULLVIEW");
+                            }}
+                            className="py-2 px-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                         >
+                            <Monitor className="w-3.5 h-3.5" /> FULLVIEW
+                         </button>
+
+                         <button
+                            type="button"
+                            onClick={() => fileInputBackupRef.current?.click()}
+                            className="py-2 px-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                         >
+                            <Upload className="w-3.5 h-3.5" /> IMPORT BACKUP
+                         </button>
+                         <input
+                            type="file"
+                            ref={fileInputBackupRef}
+                            onChange={handleImportBackup}
+                            accept=".json,.txt"
+                            className="hidden"
+                         />
+
+                         <button
+                            type="button"
+                            onClick={() => handleExportBackup()}
+                            className="py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                         >
+                            <Download className="w-3.5 h-3.5" /> EXPORT
+                         </button>
+
+                         <button
+                            type="button"
+                            onClick={() => handleDeleteSelectedCloudDocs()}
+                            className="py-2 px-3 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                         >
+                            <Trash2 className="w-3.5 h-3.5" /> DELETE ({selectedCloudDocIds.length})
                          </button>
                       </div>
 
-                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1 scrollbar-hide">
+                      {/* Online Documents List */}
+                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1 scrollbar-hide pt-1">
                          {documents.length === 0 ? (
                             <div className="p-6 text-center text-xs text-zinc-500 border border-dashed rounded-xl">
                                Nuk ka asnjë dokument. Krijoni shënime në notebook dhe ato do të shfaqen automatikisht këtu!
@@ -2977,43 +3127,74 @@ export function Notepad() {
                          ) : (
                             documents.map((docItem) => {
                                const rowCount = docItem.rows ? docItem.rows.length : 0;
+                               const isSelected = selectedCloudDocIds.includes(docItem.id);
                                return (
                                   <div 
                                      key={docItem.id} 
                                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-colors ${
-                                        isDark ? "bg-zinc-900/90 border-zinc-800 hover:border-emerald-500/40" : "bg-white border-zinc-200 hover:border-emerald-400"
+                                        isSelected 
+                                           ? (isDark ? "bg-emerald-950/40 border-emerald-500/60" : "bg-emerald-50 border-emerald-300")
+                                           : (isDark ? "bg-zinc-900/90 border-zinc-800 hover:border-emerald-500/40" : "bg-white border-zinc-200 hover:border-emerald-400")
                                      }`}
                                   >
-                                     <div className="flex items-center gap-2.5 min-w-0">
+                                     <div className="flex items-center gap-3 min-w-0">
+                                        <button
+                                           type="button"
+                                           onClick={() => {
+                                              setSelectedCloudDocIds(prev => 
+                                                 prev.includes(docItem.id) ? prev.filter(id => id !== docItem.id) : [...prev, docItem.id]
+                                              );
+                                           }}
+                                           className={`w-5 h-5 rounded flex items-center justify-center border shrink-0 transition-colors ${
+                                              isSelected ? "bg-emerald-500 border-emerald-500 text-white" : "border-zinc-600 bg-transparent text-transparent hover:border-emerald-400"
+                                           }`}
+                                        >
+                                           <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                        </button>
+
                                         <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-sm shrink-0">
                                            {docItem.title ? docItem.title.charAt(0).toUpperCase() : '📄'}
                                         </div>
+
                                         <div className="min-w-0">
-                                           <p className="text-xs font-bold truncate text-white">
+                                           <p className={`text-xs font-bold truncate ${isDark ? "text-white" : "text-zinc-900"}`}>
                                               {docItem.title || 'Dokument pa titull'}
                                            </p>
                                            <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-0.5">
-                                              <span>{rowCount} rrjeshta/të dhëna</span>
+                                              <span>{rowCount} rrjeshta</span>
                                               <span>•</span>
                                               <span className="text-emerald-400 font-mono">Në Cloud</span>
                                            </div>
                                         </div>
                                      </div>
 
-                                     <div className="flex items-center gap-1.5 shrink-0">
+                                     <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                           type="button"
+                                           onClick={() => setPreviewModalDoc(docItem)}
+                                           title="Preview"
+                                           className="p-1.5 text-zinc-400 hover:text-amber-400 transition-colors"
+                                        >
+                                           <Eye className="w-4 h-4" />
+                                        </button>
                                         <button
                                            type="button"
                                            onClick={() => {
-                                              setActiveDocId(docItem.id);
-                                              setRows(docItem.rows);
-                                              setHeaders(docItem.headers);
-                                              setTitle(docItem.title);
+                                              openDocument(docItem);
                                               showToast(`U hap dokumenti: "${docItem.title}"`);
                                               setAuthModal(false);
                                            }}
                                            className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 font-bold text-[11px] rounded-lg transition-colors"
                                         >
                                            Hape
+                                        </button>
+                                        <button
+                                           type="button"
+                                           onClick={() => handleDeleteSelectedCloudDocs(docItem.id)}
+                                           title="Fshi"
+                                           className="p-1.5 text-zinc-400 hover:text-rose-500 transition-colors"
+                                        >
+                                           <Trash2 className="w-4 h-4" />
                                         </button>
                                      </div>
                                   </div>
@@ -3043,6 +3224,124 @@ export function Notepad() {
                 </div>
              </div>
           </div>
+      )}
+
+      {/* DOCUMENT PREVIEW MODAL */}
+      {previewModalDoc && (
+         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 p-4 animate-in fade-in">
+            <div className={`max-w-3xl w-full p-5 rounded-2xl shadow-2xl border flex flex-col gap-4 ${isDark ? "bg-zinc-900 border-zinc-700 text-zinc-100" : "bg-white border-zinc-300 text-zinc-900"}`} style={{ maxHeight: '85vh' }}>
+               <div className="flex justify-between items-center border-b pb-3 border-zinc-700">
+                  <div className="flex items-center gap-2">
+                     <Eye className="w-5 h-5 text-amber-400" />
+                     <h3 className="font-bold text-base">Parashikim Dokumenti: {previewModalDoc.title}</h3>
+                  </div>
+                  <button onClick={() => setPreviewModalDoc(null)} className="p-1 rounded text-zinc-400 hover:text-red-400">
+                     <X className="w-5 h-5" />
+                  </button>
+               </div>
+               <div className="overflow-auto max-h-[60vh] border rounded-xl p-3 bg-zinc-950/40">
+                  <table className="w-full text-left text-xs border-collapse">
+                     <thead>
+                        <tr className="border-b border-zinc-700 text-emerald-400">
+                           {previewModalDoc.headers.map((h, idx) => (
+                              <th key={idx} className="p-2 font-bold uppercase">{h}</th>
+                           ))}
+                        </tr>
+                     </thead>
+                     <tbody>
+                        {previewModalDoc.rows.slice(0, 30).map((r, rIdx) => (
+                           <tr key={rIdx} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+                              {previewModalDoc.headers.map((_, cIdx) => (
+                                 <td key={cIdx} className="p-2 text-zinc-300">
+                                    {(r as any)[`col${cIdx + 1}`] || '-'}
+                                 </td>
+                              ))}
+                           </tr>
+                        ))}
+                     </tbody>
+                  </table>
+               </div>
+               <div className="flex justify-between items-center pt-2">
+                  <button
+                     type="button"
+                     onClick={() => handleExportBackup(previewModalDoc)}
+                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg flex items-center gap-1.5"
+                  >
+                     <Download className="w-3.5 h-3.5" /> Eksporto Këtë
+                  </button>
+                  <button
+                     type="button"
+                     onClick={() => {
+                        openDocument(previewModalDoc);
+                        setPreviewModalDoc(null);
+                        setAuthModal(false);
+                     }}
+                     className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg"
+                  >
+                     Hape në Editor
+                  </button>
+               </div>
+            </div>
+         </div>
+      )}
+
+      {/* DOCUMENT FULLVIEW MODAL */}
+      {fullViewDoc && (
+         <div className="fixed inset-0 z-[120] flex flex-col bg-zinc-950 text-white p-4 sm:p-6 animate-in fade-in overflow-hidden">
+            <div className="flex justify-between items-center border-b border-zinc-800 pb-4 mb-4">
+               <div className="flex items-center gap-3">
+                  <Monitor className="w-6 h-6 text-cyan-400" />
+                  <div>
+                     <h2 className="text-xl font-bold">{fullViewDoc.title}</h2>
+                     <p className="text-xs text-zinc-400">Pamja e Plotë (FULLVIEW) • {fullViewDoc.rows.length} rrjeshta të dhëna</p>
+                  </div>
+               </div>
+               <div className="flex items-center gap-2">
+                  <button
+                     type="button"
+                     onClick={() => {
+                        openDocument(fullViewDoc);
+                        setFullViewDoc(null);
+                        setAuthModal(false);
+                     }}
+                     className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg flex items-center gap-1.5"
+                  >
+                     <FileText className="w-4 h-4" /> Hape në Editor
+                  </button>
+                  <button
+                     type="button"
+                     onClick={() => setFullViewDoc(null)}
+                     className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg"
+                  >
+                     <X className="w-5 h-5" />
+                  </button>
+               </div>
+            </div>
+            <div className="flex-1 overflow-auto border border-zinc-800 rounded-2xl p-4 bg-zinc-900/80">
+               <table className="w-full text-left text-sm border-collapse">
+                  <thead>
+                     <tr className="border-b-2 border-zinc-700 text-cyan-400 font-bold uppercase text-xs">
+                        <th className="p-2.5">#</th>
+                        {fullViewDoc.headers.map((h, idx) => (
+                           <th key={idx} className="p-2.5">{h}</th>
+                        ))}
+                     </tr>
+                  </thead>
+                  <tbody>
+                     {fullViewDoc.rows.map((r, rIdx) => (
+                        <tr key={rIdx} className="border-b border-zinc-800 hover:bg-zinc-800/40">
+                           <td className="p-2.5 text-zinc-500 font-mono text-xs">{rIdx + 1}</td>
+                           {fullViewDoc.headers.map((_, cIdx) => (
+                              <td key={cIdx} className="p-2.5 text-zinc-200">
+                                 {(r as any)[`col${cIdx + 1}`] || ''}
+                              </td>
+                           ))}
+                        </tr>
+                     ))}
+                  </tbody>
+               </table>
+            </div>
+         </div>
       )}
       
       {/* DEBUG LOGS / LOGCAT CONSOLE MODAL */}

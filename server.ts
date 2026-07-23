@@ -131,7 +131,12 @@ async function startServer() {
 
       const { prompt, documents, activeDocId, image, audio } = req.body;
       const ai = new GoogleGenAI({ 
-        apiKey: process.env.GEMINI_API_KEY
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build'
+          }
+        }
       });
 
       const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË.
@@ -160,7 +165,7 @@ TI GJITHMONË DUHET TË KTHESH PËRGJIGJEN TËNDE NË FORMATIN JSON SI MË POSHT
 }
 Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
-      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      const candidateModels = ['gemini-3.6-flash', 'gemini-3.1-pro-preview', 'gemini-flash-latest'];
       let lastError: any = null;
 
       for (const modelName of candidateModels) {
@@ -215,6 +220,11 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
   });
 
 
+
+  // JSON 404 Handler for any unhandled /api/ requests
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: `API route ${req.method} ${req.originalUrl} nuk u gjet.` });
+  });
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {

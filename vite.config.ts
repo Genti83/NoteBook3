@@ -11,6 +11,9 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
+        workbox: {
+          navigateFallbackDenylist: [/^\/api/],
+        },
         manifest: {
           name: 'NoteBook3',
           short_name: 'NoteBook3',
