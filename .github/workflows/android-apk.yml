@@ -74,8 +74,15 @@ jobs:
         run: |
           chmod +x gradlew
           
-          BUILD_TYPE="${{ github.event.inputs.build_type || 'debug' }}"
-          BUILD_BUNDLE="${{ github.event.inputs.build_bundle || 'false' }}"
+          BUILD_TYPE="${{ github.event.inputs.build_type || inputs.build_type }}"
+          BUILD_BUNDLE="${{ github.event.inputs.build_bundle || inputs.build_bundle }}"
+          
+          # Fallback values if triggered via push/PR instead of workflow_dispatch
+          BUILD_TYPE="${BUILD_TYPE:-debug}"
+          BUILD_BUNDLE="${BUILD_BUNDLE:-false}"
+          
+          echo "Build Type to run: $BUILD_TYPE"
+          echo "Build Bundle: $BUILD_BUNDLE"
           
           if [ "$BUILD_TYPE" = "debug" ] || [ "$BUILD_TYPE" = "both" ]; then
             echo "--- Po ndërtohet Debug APK ---"
@@ -97,10 +104,8 @@ jobs:
         with:
           name: NoteBook3-Android-Builds
           path: |
-            android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/apk/release/app-release-unsigned.apk
-            android/app/build/outputs/apk/release/app-release.apk
-            android/app/build/outputs/bundle/release/app-release.aab
+            android/app/build/outputs/apk/**/*.apk
+            android/app/build/outputs/bundle/**/*.aab
           if-no-files-found: warn
 
       - name: Create or Update GitHub Release
@@ -117,13 +122,32 @@ jobs:
           # Sleep briefly to ensure GitHub API processes the deletion
           sleep 3
           
-          # Create new release with the built files
-          gh release create latest-apk \
-            --title "Bllok Shënimesh - Android App APK (Latest Build)" \
-            --notes "Ky është versioni më i fundit i aplikacionit NoteBook për Android (APK) i ndërtuar automatikisht nga GitHub Actions. Shkarkoni 'app-debug.apk' më poshtë për ta instaluar direkt në telefonin tuaj." \
-            --prerelease \
-            android/app/build/outputs/apk/debug/app-debug.apk \
-            android/app/build/outputs/apk/release/app-release-unsigned.apk || echo "Gabim gjatë krijimit të release, po vazhdojmë..."
+          # Find existing files to attach
+          FILES_TO_UPLOAD=""
+          if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
+            FILES_TO_UPLOAD="$FILES_TO_UPLOAD android/app/build/outputs/apk/debug/app-debug.apk"
+          fi
+          if [ -f "android/app/build/outputs/apk/release/app-release-unsigned.apk" ]; then
+            FILES_TO_UPLOAD="$FILES_TO_UPLOAD android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          fi
+          if [ -f "android/app/build/outputs/apk/release/app-release.apk" ]; then
+            FILES_TO_UPLOAD="$FILES_TO_UPLOAD android/app/build/outputs/apk/release/app-release.apk"
+          fi
+          if [ -f "android/app/build/outputs/bundle/release/app-release.aab" ]; then
+            FILES_TO_UPLOAD="$FILES_TO_UPLOAD android/app/build/outputs/bundle/release/app-release.aab"
+          fi
+
+          echo "Skedarët që do të ngarkohen: $FILES_TO_UPLOAD"
+
+          if [ -n "$FILES_TO_UPLOAD" ]; then
+            gh release create latest-apk \
+              --title "Bllok Shënimesh - Android App APK (Latest Build)" \
+              --notes "Ky është versioni më i fundit i aplikacionit NoteBook për Android (APK) i ndërtuar automatikisht nga GitHub Actions. Shkarkoni 'app-debug.apk' më poshtë për ta instaluar direkt në telefonin tuaj." \
+              --prerelease \
+              $FILES_TO_UPLOAD || echo "Gabim gjatë krijimit të release, po vazhdojmë..."
+          else
+            echo "Nuk u gjet asnjë skedar për të ngarkuar në Release!"
+          fi
 
 
 
