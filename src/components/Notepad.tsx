@@ -377,7 +377,7 @@ export function Notepad() {
   const [backupModal, setBackupModal] = useState(false);
   const [gistToken, setGistToken] = useState(localStorage.getItem('grid_notepad_gist_token') || '');
   const [gistId, setGistId] = useState(localStorage.getItem('grid_notepad_gist_id') || '');
-  const [aiAutopilot, setAiAutopilot] = useState<boolean>(() => localStorage.getItem('grid_ai_autopilot') === 'true');
+  const [aiAutopilot, setAiAutopilot] = useState<boolean>(() => localStorage.getItem('grid_ai_autopilot') !== 'false');
   const [isAiAutopilotRunning, setIsAiAutopilotRunning] = useState(false);
   const [gistViewerModal, setGistViewerModal] = useState(false);
   const [gistViewerContent, setGistViewerContent] = useState<string | null>(null);
@@ -842,8 +842,10 @@ export function Notepad() {
      };
 
      recognition.onerror = (event: any) => {
-        if (event.error !== 'aborted' && event.error !== 'no-speech') {
+        if (event.error !== 'aborted' && event.error !== 'no-speech' && event.error !== 'not-allowed') {
             console.error("Speech recognition error", event.error);
+        } else {
+            console.warn("Speech recognition notice:", event.error);
         }
         if (event.error === 'not-allowed') {
            showToast("Ju lutem lejoni përdorimin e mikrofonit.");
@@ -896,8 +898,10 @@ export function Notepad() {
      };
 
      recognition.onerror = (event: any) => {
-        if (event.error !== 'aborted' && event.error !== 'no-speech') {
+        if (event.error !== 'aborted' && event.error !== 'no-speech' && event.error !== 'not-allowed') {
             console.error("Speech recognition error", event.error);
+        } else {
+            console.warn("Speech recognition notice:", event.error);
         }
         if (event.error === 'not-allowed') {
            showToast("Ju lutem lejoni përdorimin e mikrofonit.");
@@ -942,10 +946,11 @@ export function Notepad() {
           audio: aiChatAudio,
           blueText,
           secretList,
-          userEmail: mail
-       });
-       
-       const endpoints = getApiEndpoints('/api/ai/chat');
+          userEmail: mail,
+           geminiKey: userGeminiKey || localStorage.getItem('grid_notepad_gemini_key') || ''
+        });
+        
+        const endpoints = getApiEndpoints('/api/ai/chat');
 
        let response: Response | null = null;
        let lastErrMessage = '';
@@ -1037,7 +1042,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 }
              };
 
-             const candidateModels = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.6-flash', 'gemini-3.1-flash-lite'];
+             const candidateModels = ['gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.5-pro'];
 
              // First try official @google/genai Client SDK
              try {
@@ -1870,7 +1875,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
   const autopilotTimeout = useRef<any>(null);
 
   const runAiAutopilot = (updatedDocs?: GridDocument[], updatedBlueText?: string) => {
-     const isEnabled = localStorage.getItem('grid_ai_autopilot') === 'true';
+     const isEnabled = localStorage.getItem('grid_ai_autopilot') !== 'false';
      if (!isEnabled || !navigator.onLine) return;
 
      if (autopilotTimeout.current) clearTimeout(autopilotTimeout.current);
@@ -1896,8 +1901,9 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
               image: null, 
               audio: null,
               blueText: finalBlueText,
-              secretList,
-              userEmail: mail
+               secretList,
+               userEmail: mail,
+               geminiKey: userGeminiKey || localStorage.getItem('grid_notepad_gemini_key') || ''
            });
            
            const endpoints = getApiEndpoints('/api/ai/chat');
@@ -4430,9 +4436,53 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                             </button>
                          </div>
                       ) : (
-                         <button onClick={() => {setBackupModal(false); setAuthModal(true)}} className={`w-full flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors bg-accent-600 hover:bg-accent-500 text-white shadow-lg`}>
-                            <LogIn className="w-4 h-4" /> {t('Kyçuni për Cloud', 'Login for Cloud')}
-                         </button>
+                         <div className="space-y-4 w-full text-left">
+                             {/* Email Import Direct Section for New Phone Installation */}
+                             <div className="p-3.5 rounded-xl border bg-zinc-100/50 dark:bg-zinc-950/50 border-zinc-300 dark:border-zinc-800 space-y-3">
+                                <h5 className="text-xs font-bold uppercase tracking-wider text-sky-500 flex items-center gap-1.5 font-sans">
+                                   <RefreshCw className="w-3.5 h-3.5 animate-spin-slow text-sky-500" /> {t('Importim i Shpejtë me Email (Telefon i Ri)', 'Quick Email Import (New Phone)')}
+                                </h5>
+                                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                   {t('Nëse sapo keni instaluar aplikacionin në një telefon të ri, shkruani email-in tuaj më poshtë për të importuar dhe ngarkuar plotësisht të gjitha shënimet tuaja nga Cloud.', 'If you just installed the app on a new phone, enter your email below to import and fully load all your notes from the Cloud.')}
+                                </p>
+                                <div className="flex flex-col sm:flex-row gap-2">
+                                   <input 
+                                      type="email"
+                                      value={email}
+                                      onChange={(e) => {
+                                         const val = e.target.value;
+                                         setEmail(val);
+                                         localStorage.setItem('grid_notepad_saved_email', val);
+                                         localStorage.setItem('grid_notepad_user_account', val);
+                                      }}
+                                      placeholder="Adresa e-mail (p.sh. genti8319@gmail.com)"
+                                      className={`flex-1 px-3 py-1.5 text-xs rounded-lg border outline-none font-semibold ${
+                                         isDark ? "bg-zinc-900 border-zinc-700 text-white focus:border-sky-500" : "bg-white border-zinc-300 text-zinc-900 focus:border-sky-500"
+                                      }`}
+                                   />
+                                   <button
+                                      onClick={async () => {
+                                         const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
+                                         if (!mail) {
+                                            showToast("Ju lutem shkruani një email të vlefshëm!");
+                                            return;
+                                         }
+                                         localStorage.setItem('grid_notepad_saved_email', mail);
+                                         localStorage.setItem('grid_notepad_user_account', mail);
+                                         showToast("Duke ngarkuar dokumentet online për " + mail + "...");
+                                         await handleUnifiedCloudSync();
+                                      }}
+                                      className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1 shrink-0"
+                                   >
+                                      <Download className="w-3.5 h-3.5" /> {t('Importo nga Cloud', 'Import from Cloud')}
+                                   </button>
+                                </div>
+                             </div>
+
+                             <button onClick={() => {setBackupModal(false); setAuthModal(true)}} className={`w-full flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors bg-accent-600 hover:bg-accent-500 text-white shadow-lg`}>
+                                <LogIn className="w-4 h-4" /> {t('Kyçuni për Cloud / Menaxho', 'Login for Cloud / Manage')}
+                             </button>
+                          </div>
                       )}
                    </div>
 

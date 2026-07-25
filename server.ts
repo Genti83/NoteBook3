@@ -132,12 +132,28 @@ async function startServer() {
   app.post('/api/ai/chat', async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     try {
-      if (!process.env.GEMINI_API_KEY) {
-        return res.status(500).json({ error: 'GEMINI_API_KEY environment variable is missing on server.' });
+      const { prompt, documents, activeDocId, image, audio, blueText, secretList, userEmail, geminiKey } = req.body;
+
+      // Robust Multi-tier API Key Resolution
+      let apiKey = (geminiKey || '').trim();
+      if (!apiKey && userEmail) {
+        const key = userEmail.trim().toLowerCase();
+        const db = readCloudDb();
+        if (db[key] && db[key].geminiKey) {
+          apiKey = db[key].geminiKey.trim();
+        }
+      }
+      if (!apiKey) {
+        apiKey = (process.env.GEMINI_API_KEY || '').trim();
       }
 
-      const { prompt, documents, activeDocId, image, audio, blueText, secretList, userEmail } = req.body;
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      if (!apiKey) {
+        return res.status(400).json({ 
+          error: 'Çelësi juaj API i Gemini mungon. Ju lutem konfiguroni atë në panelin "Settings > Secrets" të AI Studio ose shtoni një çelës API të vlefshëm në cilësimet e Notepad-it.' 
+        });
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
 
       const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË (përfshirë ato manuale, të nenvizuara dhe ato në Cloud për llogarinë ${userEmail || 'genti8319@gmail.com'}).
 Këtu janë të dhënat e dokumenteve aktualë në formatin JSON:
@@ -173,7 +189,15 @@ TI GJITHMONË DUHET TË KTHESH PËRGJIGJEN TËNDE NË FORMATIN JSON SI MË POSHT
 }
 Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
-      const candidateModels = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.6-flash', 'gemini-3.1-flash-lite'];
+      // Prioritize modern, high-performance models as recommended in gemini-api guidelines
+      const candidateModels = [
+        'gemini-3.6-flash',
+        'gemini-3.1-flash-lite',
+        'gemini-3.1-pro-preview',
+        'gemini-flash-latest',
+        'gemini-2.5-flash',
+        'gemini-2.5-pro'
+      ];
       let lastError: any = null;
 
       for (const modelName of candidateModels) {
@@ -223,7 +247,12 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       throw lastError || new Error("Asnjë nga modelet e AI nuk u përgjigj.");
     } catch (err: any) {
       console.error('AI Chat Error:', err);
-      res.status(500).json({ error: err.message || 'Ndodhi një gabim gjatë komunikimit me AI.' });
+      let friendlyMessage = err.message || 'Ndodhi një gabim gjatë komunikimit me AI.';
+      const lowerMsg = friendlyMessage.toLowerCase();
+      if (lowerMsg.includes('api key not valid') || lowerMsg.includes('api_key_invalid') || lowerMsg.includes('api key') || lowerMsg.includes('unauthenticated') || lowerMsg.includes('invalid key')) {
+        friendlyMessage = 'Çelësi juaj API i Gemini nuk është i vlefshëm ose mungon. Ju lutem kontrolloni dhe rregulloni konfigurimin e çelësit tuaj në panelin "Settings > Secrets" të AI Studio.';
+      }
+      res.status(400).json({ error: friendlyMessage });
     }
   });
 
