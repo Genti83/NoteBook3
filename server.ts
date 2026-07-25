@@ -59,6 +59,7 @@ async function startServer() {
         pin: pin !== undefined ? pin : db[key]?.pin,
         gistToken: gistToken !== undefined ? gistToken : db[key]?.gistToken,
         gistId: gistId !== undefined ? gistId : db[key]?.gistId,
+        geminiKey: req.body.geminiKey !== undefined ? req.body.geminiKey : db[key]?.geminiKey,
         lastUpdated
       };
       
@@ -102,6 +103,7 @@ async function startServer() {
         pin: record.pin,
         gistToken: record.gistToken,
         gistId: record.gistId,
+        geminiKey: record.geminiKey,
         lastUpdated: record.lastUpdated
       });
     } catch (err: any) {

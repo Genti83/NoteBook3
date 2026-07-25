@@ -377,6 +377,8 @@ export function Notepad() {
   const [backupModal, setBackupModal] = useState(false);
   const [gistToken, setGistToken] = useState(localStorage.getItem('grid_notepad_gist_token') || '');
   const [gistId, setGistId] = useState(localStorage.getItem('grid_notepad_gist_id') || '');
+  const [aiAutopilot, setAiAutopilot] = useState<boolean>(() => localStorage.getItem('grid_ai_autopilot') === 'true');
+  const [isAiAutopilotRunning, setIsAiAutopilotRunning] = useState(false);
   const [gistViewerModal, setGistViewerModal] = useState(false);
   const [gistViewerContent, setGistViewerContent] = useState<string | null>(null);
 
@@ -639,6 +641,10 @@ export function Notepad() {
 
      // 2. Set the merged state locally and save to localStorage
      setDocuments(mergedDocs);
+     if (cloudData && cloudData.geminiKey) {
+        setUserGeminiKey(cloudData.geminiKey);
+        localStorage.setItem('grid_notepad_gemini_key', cloudData.geminiKey);
+     }
      setCloudDocs(mergedDocs);
      localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(mergedDocs));
 
@@ -1266,7 +1272,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       secretList: finalSecretList,
       pin: localStorage.getItem('grid_notepad_pin') || null,
       gistToken: gistToken || localStorage.getItem('grid_notepad_gist_token') || null,
-      gistId: gistId || localStorage.getItem('grid_notepad_gist_id') || null
+      gistId: gistId || localStorage.getItem('grid_notepad_gist_id') || null,
+      geminiKey: userGeminiKey || localStorage.getItem('grid_notepad_gemini_key') || null
     });
 
     const endpoints = getApiEndpoints('/api/cloud/sync');
@@ -1835,8 +1842,11 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
   }, []);
   
   useEffect(() => {
-     if (auth.currentUser && navigator.onLine) {
-        const t = setTimeout(() => {
+     localStorage.setItem('grid_notepad_blue', blueText);
+     localStorage.setItem('grid_notepad_secret_list', JSON.stringify(secretList));
+
+     const t = setTimeout(async () => {
+        if (auth.currentUser && navigator.onLine) {
            const blueRef = doc(db, 'settings', getActiveUid()!);
            setDoc(blueRef, { 
                blueText, 
@@ -1844,12 +1854,130 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                userId: getActiveUid()!, 
                pin: localStorage.getItem('grid_notepad_pin') || null 
            }, { merge: true }).catch(()=>{});
-        }, 1500);
-        return () => clearTimeout(t);
-     }
+        }
+        if (navigator.onLine) {
+           await syncWithGoogleCloud(documents, true, blueText, secretList);
+        }
+     }, 1500);
+
+     runAiAutopilot(documents, blueText);
+
+     return () => clearTimeout(t);
   }, [blueText, secretList]);
 
 
+
+  const autopilotTimeout = useRef<any>(null);
+
+  const runAiAutopilot = (updatedDocs?: GridDocument[], updatedBlueText?: string) => {
+     const isEnabled = localStorage.getItem('grid_ai_autopilot') === 'true';
+     if (!isEnabled || !navigator.onLine) return;
+
+     if (autopilotTimeout.current) clearTimeout(autopilotTimeout.current);
+     autopilotTimeout.current = setTimeout(async () => {
+        setIsAiAutopilotRunning(true);
+        appendDebugLog(`🤖 [AI Autopilot] Agjenti aktiv po analizon ndryshimet e fundit në sfond...`);
+        try {
+           const docs = updatedDocs || latestDocsRef.current || documents;
+           const finalBlueText = updatedBlueText !== undefined ? updatedBlueText : blueText;
+           const docsForAi = docs.map(docItem => ({
+              ...docItem,
+              rows: docItem.rows.map(r => {
+                 const { image, ...rest } = r;
+                 return rest;
+              })
+           }));
+           
+           const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
+           const payload = JSON.stringify({ 
+              prompt: "Autopilot Check: Kontrollo dhe auto-përditëso/korrigjo llogaritjet, plotëso kolonat totale/shuma të zbrazëta ose korrigjo drejtshkrimin nëse ka gabime të dukshme.", 
+              documents: docsForAi, 
+              activeDocId: activeDocIdRef.current, 
+              image: null, 
+              audio: null,
+              blueText: finalBlueText,
+              secretList,
+              userEmail: mail
+           });
+           
+           const endpoints = getApiEndpoints('/api/ai/chat');
+           let response: Response | null = null;
+           for (const ep of endpoints) {
+              try {
+                 const res = await fetch(ep, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: payload
+                 });
+                 if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+                    response = res;
+                    break;
+                 }
+              } catch (e) {}
+           }
+
+           if (response) {
+              const data = await response.json();
+              if (data && data.actions && Array.isArray(data.actions) && data.actions.length > 0) {
+                 appendDebugLog(`🎉 [AI Autopilot] Agjenti gjeti korrigjime dhe po i aplikon ato automatikisht!`);
+                 data.actions.forEach((act: any) => {
+                     if (act.type === 'PROPOSE_COLUMNS_CHANGE' && act.documentId) {
+                         setDocuments(prevDocs => {
+                             const next = prevDocs.map(d => {
+                                 if (d.id === act.documentId) {
+                                     return {
+                                         ...d,
+                                         headers: act.newHeaders || d.headers,
+                                         columnWidths: act.newColumnWidths || d.columnWidths,
+                                         rows: act.newRows || d.rows,
+                                         updatedAt: new Date().toISOString()
+                                     };
+                                 }
+                                 return d;
+                             });
+                             localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(next));
+                             syncWithGoogleCloud(next, true);
+                             return next;
+                         });
+                         if (act.documentId === activeDocIdRef.current) {
+                             if (act.newHeaders) setHeaders(act.newHeaders);
+                             if (act.newColumnWidths) setColumnWidths(act.newColumnWidths);
+                             if (act.newRows) setRows(act.newRows);
+                         }
+                         showToast("⚡ Agjenti Gemini kreu auto-përditësime në sfond!");
+                     } else if (act.type === 'UPDATE_DOCUMENT_ROWS' && act.documentId) {
+                         setDocuments(prevDocs => {
+                             const next = prevDocs.map(d => {
+                                 if (d.id === act.documentId) {
+                                     return {
+                                         ...d,
+                                         rows: act.newRows || d.rows,
+                                         updatedAt: new Date().toISOString()
+                                     };
+                                 }
+                                 return d;
+                             });
+                             localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(next));
+                             syncWithGoogleCloud(next, true);
+                             return next;
+                         });
+                         if (act.documentId === activeDocIdRef.current && act.newRows) {
+                             setRows(act.newRows);
+                         }
+                         showToast("⚡ Agjenti Gemini korrigjoi rreshtat e bllokut automatikisht!");
+                     }
+                 });
+              } else {
+                 appendDebugLog(`🤖 [AI Autopilot] Analiza mbaroi: Nuk u gjet asnjë gabim apo boshllëk për të plotësuar.`);
+              }
+           }
+        } catch (err: any) {
+           console.warn("Autopilot error:", err);
+        } finally {
+           setIsAiAutopilotRunning(false);
+        }
+     }, 10000); // 10 seconds of inactivity triggers the background agent
+  };
 
   const triggerAutoSave = (updatedDocs: GridDocument[]) => {
       latestDocsRef.current = updatedDocs;
@@ -1883,6 +2011,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
          setAutoSaveMsg('Ruajtur në Cloud');
          setTimeout(() => setAutoSaveMsg(''), 2000);
       }, freq);
+
+      runAiAutopilot(updatedDocs);
   };
 
   useEffect(() => {
@@ -4303,6 +4433,46 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                          <button onClick={() => {setBackupModal(false); setAuthModal(true)}} className={`w-full flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors bg-accent-600 hover:bg-accent-500 text-white shadow-lg`}>
                             <LogIn className="w-4 h-4" /> {t('Kyçuni për Cloud', 'Login for Cloud')}
                          </button>
+                      )}
+                   </div>
+
+                   {/* Gemini Active Agent (Autopilot) */}
+                   <div className={`p-4 rounded-xl border space-y-3 shadow-sm transition-all ${isDark ? "bg-purple-950/20 border-purple-900/40 hover:border-purple-900/60" : "bg-purple-50/25 border-purple-100 hover:border-purple-200"}`}>
+                      <div className="flex items-center justify-between gap-4">
+                         <div className="flex items-center gap-2">
+                            <Sparkles className="w-5 h-5 text-purple-500 shrink-0 animate-pulse" />
+                            <div>
+                               <h4 className={`font-bold text-sm text-purple-600 dark:text-purple-400`}>
+                                  Agjenti Aktiv Gemini (Autopilot)
+                                </h4>
+                               <p className="text-[10px] text-zinc-400">
+                                  Korigjim & Plotësim Automatike Matematike / Drejtshkrimore
+                               </p>
+                            </div>
+                         </div>
+                         <label className="relative inline-flex items-center cursor-pointer">
+                            <input 
+                               type="checkbox" 
+                               checked={aiAutopilot} 
+                               onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  setAiAutopilot(checked);
+                                  localStorage.setItem('grid_ai_autopilot', checked ? 'true' : 'false');
+                                  showToast(checked ? "🤖 Agjenti Aktiv Gemini u aktivizua!" : "🤖 Agjenti Aktiv u çaktivizua.");
+                               }}
+                               className="sr-only peer" 
+                            />
+                            <div className="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                         </label>
+                      </div>
+                      <p className={`text-xs leading-relaxed ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                         Kur shkruani rreshta, bëni shënime ose listoni detyra, Agjenti Online i Gemini analizon punën tuaj në sfond pas 10 sekondash qetësie dhe kryen automatikisht plotësimet e kolonave me llogaritje (shuma, sasi, çmimi) dhe korigjon gabimet drejtshkrimore me siguri të lartë!
+                      </p>
+                      {isAiAutopilotRunning && (
+                         <div className="flex items-center gap-2 text-xs text-purple-500 font-bold animate-pulse">
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            Agjenti po analizon bllokun tuaj online...
+                         </div>
                       )}
                    </div>
 
