@@ -74,38 +74,46 @@ jobs:
         run: |
           chmod +x gradlew
           
-          # 1. Read values from GitHub event or inputs safely
-          RAW_BUILD_TYPE="${{ github.event.inputs.build_type }}"
-          RAW_BUILD_BUNDLE="${{ github.event.inputs.build_bundle }}"
-          
-          # 2. Safely fall back to default values if empty, null, or undefined
+          # Përcakto vlerat e paracaktura
           BUILD_TYPE="debug"
-          if [ -n "$RAW_BUILD_TYPE" ] && [ "$RAW_BUILD_TYPE" != "null" ] && [ "$RAW_BUILD_TYPE" != "undefined" ]; then
-            BUILD_TYPE="$RAW_BUILD_TYPE"
-          fi
-          
           BUILD_BUNDLE="false"
-          if [ -n "$RAW_BUILD_BUNDLE" ] && [ "$RAW_BUILD_BUNDLE" != "null" ] && [ "$RAW_BUILD_BUNDLE" != "undefined" ]; then
-            BUILD_BUNDLE="$RAW_BUILD_BUNDLE"
+          
+          # Ndrysho vlerat nëse thirret në mënyrë manuale (workflow_dispatch)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "${{ github.event.inputs.build_type }}" ] && [ "${{ github.event.inputs.build_type }}" != "null" ]; then
+              BUILD_TYPE="${{ github.event.inputs.build_type }}"
+            fi
+            if [ -n "${{ github.event.inputs.build_bundle }}" ] && [ "${{ github.event.inputs.build_bundle }}" != "null" ]; then
+              BUILD_BUNDLE="${{ github.event.inputs.build_bundle }}"
+            fi
           fi
           
-          echo "Normalized Build Type: $BUILD_TYPE"
-          echo "Normalized Build Bundle: $BUILD_BUNDLE"
+          echo "========================================="
+          echo " Ngjarja nxitëse: ${{ github.event_name }}"
+          echo " Lloji i ndërtimit: $BUILD_TYPE"
+          echo " Android App Bundle (AAB): $BUILD_BUNDLE"
+          echo "========================================="
           
           if [ "$BUILD_TYPE" = "debug" ] || [ "$BUILD_TYPE" = "both" ]; then
             echo "--- Po ndërtohet Debug APK ---"
-            ./gradlew assembleDebug --stacktrace
+            ./gradlew assembleDebug --no-daemon --stacktrace
           fi
           
           if [ "$BUILD_TYPE" = "release" ] || [ "$BUILD_TYPE" = "both" ]; then
             echo "--- Po ndërtohet Release APK ---"
-            ./gradlew assembleRelease --stacktrace
+            ./gradlew assembleRelease --no-daemon --stacktrace
             
             if [ "$BUILD_BUNDLE" = "true" ]; then
               echo "--- Po ndërtohet Release AAB Bundle ---"
-              ./gradlew bundleRelease --stacktrace
+              ./gradlew bundleRelease --no-daemon --stacktrace
             fi
           fi
+
+      - name: List Generated Files for Debugging
+        run: |
+          echo "=== KËRKIMI I SKEDARËVE TË GJENERUAR ==="
+          find . -name "*.apk" -o -name "*.aab" || echo "Nuk u gjet asnjë skedar APK ose AAB!"
+          echo "========================================"
 
       - name: Upload Built Artifacts
         uses: actions/upload-artifact@v4
