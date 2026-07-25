@@ -55,6 +55,11 @@ jobs:
         run: |
           if [ ! -d "android" ]; then
             npx cap add android
+          elif [ ! -f "android/gradlew" ]; then
+            echo "Drejtoria android ekziston por mungon gradlew. Po gjenerojmë wrapper-in e Gradle..."
+            cd android
+            gradle wrapper --gradle-version 8.5 || gradle wrapper || echo "Dështoi krijimi i gradle wrapper!"
+            cd ..
           fi
 
       - name: Sync Capacitor
@@ -105,11 +110,11 @@ EOF
             echo "google-services.json already exists!"
           fi
 
-      - name: Setup Java JDK 21
+      - name: Setup Java JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '21'
+          java-version: '17'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
