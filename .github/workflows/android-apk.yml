@@ -74,15 +74,23 @@ jobs:
         run: |
           chmod +x gradlew
           
-          BUILD_TYPE="${{ github.event.inputs.build_type || inputs.build_type }}"
-          BUILD_BUNDLE="${{ github.event.inputs.build_bundle || inputs.build_bundle }}"
+          # 1. Read values from GitHub event or inputs safely
+          RAW_BUILD_TYPE="${{ github.event.inputs.build_type }}"
+          RAW_BUILD_BUNDLE="${{ github.event.inputs.build_bundle }}"
           
-          # Fallback values if triggered via push/PR instead of workflow_dispatch
-          BUILD_TYPE="${BUILD_TYPE:-debug}"
-          BUILD_BUNDLE="${BUILD_BUNDLE:-false}"
+          # 2. Safely fall back to default values if empty, null, or undefined
+          BUILD_TYPE="debug"
+          if [ -n "$RAW_BUILD_TYPE" ] && [ "$RAW_BUILD_TYPE" != "null" ] && [ "$RAW_BUILD_TYPE" != "undefined" ]; then
+            BUILD_TYPE="$RAW_BUILD_TYPE"
+          fi
           
-          echo "Build Type to run: $BUILD_TYPE"
-          echo "Build Bundle: $BUILD_BUNDLE"
+          BUILD_BUNDLE="false"
+          if [ -n "$RAW_BUILD_BUNDLE" ] && [ "$RAW_BUILD_BUNDLE" != "null" ] && [ "$RAW_BUILD_BUNDLE" != "undefined" ]; then
+            BUILD_BUNDLE="$RAW_BUILD_BUNDLE"
+          fi
+          
+          echo "Normalized Build Type: $BUILD_TYPE"
+          echo "Normalized Build Bundle: $BUILD_BUNDLE"
           
           if [ "$BUILD_TYPE" = "debug" ] || [ "$BUILD_TYPE" = "both" ]; then
             echo "--- Po ndërtohet Debug APK ---"
