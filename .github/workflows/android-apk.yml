@@ -30,6 +30,7 @@ jobs:
   build:
     name: Build Android App
     runs-on: ubuntu-latest
+    permissions: write-all
 
     steps:
       - name: Checkout Repository
@@ -101,5 +102,28 @@ jobs:
             android/app/build/outputs/apk/release/app-release.apk
             android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: warn
+
+      - name: Create or Update GitHub Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Po përgatitet publikimi i APK-së në GitHub Releases..."
+          
+          # Delete existing 'latest-apk' release and tag locally and remotely if they exist
+          gh release delete latest-apk --yes || true
+          git push --delete origin latest-apk || true
+          
+          # Sleep briefly to ensure GitHub API processes the deletion
+          sleep 3
+          
+          # Create new release with the built files
+          gh release create latest-apk \
+            --title "Bllok Shënimesh - Android App APK (Latest Build)" \
+            --notes "Ky është versioni më i fundit i aplikacionit NoteBook për Android (APK) i ndërtuar automatikisht nga GitHub Actions. Shkarkoni 'app-debug.apk' më poshtë për ta instaluar direkt në telefonin tuaj." \
+            --prerelease \
+            android/app/build/outputs/apk/debug/app-debug.apk \
+            android/app/build/outputs/apk/release/app-release-unsigned.apk || echo "Gabim gjatë krijimit të release, po vazhdojmë..."
+
 
 
