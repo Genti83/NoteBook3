@@ -3879,17 +3879,120 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                             </button>
                          </div>
                       ) : (
-                         <div className="space-y-3 text-left">
-                            <p className="text-xs text-zinc-400">
-                               {t('Për të sinkronizuar shënimet, konfigurimet dhe sekretet tuaja në mënyrë të sigurt, kyçuni me Email/Fjalëkalim ose llogari Google.', 'To sync your notes, settings, and secrets securely, please log in with Email/Password or Google account.')}
-                            </p>
-                            <button
-                               type="button"
-                               onClick={() => setAuthModal(true)}
-                               className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5"
-                            >
-                               <LogIn className="w-4 h-4" /> {t('Kyçu në Cloud', 'Log in to Cloud')}
-                            </button>
+                         <div className="space-y-4 text-left">
+                            {/* Tabs to switch between Sign In and Sign Up */}
+                            <div className="flex border-b border-zinc-800/20 pb-2">
+                               <button
+                                  type="button"
+                                  onClick={() => setIsSignUp(false)}
+                                  className={`flex-1 pb-2 text-center text-xs font-bold uppercase tracking-wider transition-all border-b-2 ${
+                                     !isSignUp 
+                                        ? "text-emerald-400 border-emerald-500" 
+                                        : "text-zinc-500 border-transparent hover:text-zinc-300"
+                                  }`}
+                               >
+                                  Kyçu (Login)
+                               </button>
+                               <button
+                                  type="button"
+                                  onClick={() => setIsSignUp(true)}
+                                  className={`flex-1 pb-2 text-center text-xs font-bold uppercase tracking-wider transition-all border-b-2 ${
+                                     isSignUp 
+                                        ? "text-emerald-400 border-emerald-500" 
+                                        : "text-zinc-500 border-transparent hover:text-zinc-300"
+                                  }`}
+                               >
+                                  Krijo Llogari (Sign Up)
+                               </button>
+                            </div>
+
+                            {/* Form fields */}
+                            <form onSubmit={handleEmailAuth} className="space-y-3">
+                               <div>
+                                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                                     Adresa Email
+                                  </label>
+                                  <input
+                                     type="email"
+                                     required
+                                     placeholder="emri@shembull.com"
+                                     value={email}
+                                     onChange={(e) => setEmail(e.target.value)}
+                                     className={`w-full px-3.5 py-2 rounded-xl border text-sm font-semibold outline-none transition-all ${
+                                        isDark 
+                                           ? "bg-zinc-900 border-zinc-700 text-white focus:border-emerald-500" 
+                                           : "bg-white border-zinc-300 text-zinc-900 focus:border-emerald-500"
+                                     }`}
+                                  />
+                               </div>
+
+                               <div>
+                                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                                     Fjalëkalimi (Password)
+                                  </label>
+                                  <input
+                                     type="password"
+                                     required
+                                     placeholder="••••••••"
+                                     value={password}
+                                     onChange={(e) => setPassword(e.target.value)}
+                                     className={`w-full px-3.5 py-2 rounded-xl border text-sm font-semibold outline-none transition-all ${
+                                        isDark 
+                                           ? "bg-zinc-900 border-zinc-700 text-white focus:border-emerald-500" 
+                                           : "bg-white border-zinc-300 text-zinc-900 focus:border-emerald-500"
+                                     }`}
+                                  />
+                               </div>
+
+                               <button
+                                  type="submit"
+                                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 mt-2"
+                               >
+                                  <LogIn className="w-4 h-4" /> 
+                                  {isSignUp ? t('Krijo Llogari', 'Create Account') : t('Kyçu me Email', 'Log in with Email')}
+                               </button>
+                            </form>
+
+                            {/* Divider */}
+                            <div className="relative flex py-2 items-center">
+                               <div className="flex-grow border-t border-zinc-800/40"></div>
+                               <span className="flex-shrink mx-4 text-zinc-500 text-[10px] font-bold uppercase tracking-widest">OSE / OR</span>
+                               <div className="flex-grow border-t border-zinc-800/40"></div>
+                            </div>
+
+                            {/* Alternative Login buttons */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                               <button
+                                  type="button"
+                                  onClick={loginWithGoogle}
+                                  className={`py-2.5 px-4 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                                     isDark 
+                                        ? "bg-zinc-900 border-zinc-800 text-zinc-200 hover:bg-zinc-800" 
+                                        : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50 shadow-sm"
+                                  }`}
+                               >
+                                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                                     <path fill="#EA4335" d="M12 5.04c1.61 0 3.05.56 4.19 1.65l3.12-3.12C17.43 1.84 14.9 1 12 1 7.35 1 3.4 3.65 1.5 7.5l3.6 2.8C6.01 7.15 8.79 5.04 12 5.04z" />
+                                     <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.27H12v4.51h6.46c-.29 1.48-1.14 2.73-2.4 3.58l3.6 2.8c2.11-1.95 3.83-4.82 3.83-8.62z" />
+                                     <path fill="#FBBC05" d="M5.1 14.7c-.24-.73-.38-1.5-.38-2.3s.14-1.57.38-2.3L1.5 7.3C.54 9.12 0 11.16 0 13.3c0 2.14.54 4.18 1.5 6l3.6-2.6z" />
+                                     <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.6-2.8c-1.11.75-2.53 1.21-4.36 1.21-3.21 0-5.99-2.11-6.9-5.26l-3.6 2.8C3.4 20.35 7.35 23 12 23z" />
+                                  </svg>
+                                  {t('Vazhdo me Google', 'Continue with Google')}
+                               </button>
+
+                               <button
+                                  type="button"
+                                  onClick={handleAnonymousAuth}
+                                  className={`py-2.5 px-4 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                                     isDark 
+                                        ? "bg-zinc-900 border-zinc-800 text-zinc-200 hover:bg-zinc-800" 
+                                        : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50 shadow-sm"
+                                  }`}
+                               >
+                                  <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                                  {t('Hyrje e Shpejtë (Anonym)', 'Fast Login (Anonymous)')}
+                               </button>
+                            </div>
                          </div>
                       )}
                    </div>
