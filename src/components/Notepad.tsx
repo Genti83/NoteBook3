@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getDirectoryHandle, saveDirectoryHandle } from '../lib/directoryFS';
-import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen, Terminal, Copy, CheckCheck, Folder, User, Key } from 'lucide-react';
+import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen, Terminal, Copy, CheckCheck, Folder, User, Key, AlertTriangle } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { useFirebase } from '../hooks/useFirebase';
@@ -367,6 +367,13 @@ export function Notepad() {
   const [appLockInput, setAppLockInput] = useState('');
 
   const [authModal, setAuthModal] = useState(false);
+  const [authError, setAuthError] = useState<{ code: string; message: string; provider: string } | null>(null);
+
+  useEffect(() => {
+    if (authModal) {
+      setAuthError(null);
+    }
+  }, [authModal]);
   const { user, loading, loginWithGoogle: hookGoogleLogin, loginWithEmail: hookEmailLogin, registerWithEmail: hookEmailRegister, loginAnonymously: hookAnonymousLogin, logout: hookLogout } = useFirebase();
   const [email, setEmail] = useState(() => localStorage.getItem('grid_notepad_saved_email') || '');
   const [password, setPassword] = useState('');
@@ -1770,6 +1777,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
           setTimeout(() => forceCloudBackup(), 1500);
       } catch (err: any) {
           console.error("Email auth err:", err);
+          setAuthError({ code: err.code || 'unknown', message: err.message, provider: 'email' });
           let msg = "Gabim: " + err.message;
           if (err.code === 'auth/email-already-in-use') {
              try {
@@ -1791,7 +1799,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                  return;
              } catch (loginErr: any) {
                  setIsSignUp(false);
-                 alert("Kjo llogari ekziston tashmë! Paneli kaloi automatikisht tek 'Login' (Hyrje). Ju lutem vendosni fjalëkalimin tuaj për t'u kyçur.");
+                 setAuthError({ code: loginErr.code || 'unknown', message: loginErr.message, provider: 'email' });
                  return;
              }
           }
@@ -1801,8 +1809,6 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
              msg = "Kredenciale të gabuara! Nëse jeni regjistruar me Google, klikoni butonin Google.";
           }
           if (err.code === 'auth/operation-not-allowed') {
-             msg = "Kujdes: Hyrja me Email/Password nuk është e aktivizuar!\n\nJu lutem shkoni tek Firebase Console:\n1. Authentication\n2. Sign-in method\n3. Aktivizoni 'Email/Password'";
-             alert(msg);
              return;
           }
           if (err.code === 'auth/network-request-failed') {
@@ -1832,12 +1838,10 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
             setTimeout(() => forceCloudBackup(), 1500);
          }
       } catch (err: any) {
+         console.error("Google auth err:", err);
+         setAuthError({ code: err.code || 'unknown', message: err.message, provider: 'google' });
          if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
              showToast("Dritarja u mbyll! Provoni përsëri ose përdorni hyrjen me Email/Password.");
-         } else if (err.code === 'auth/operation-not-allowed') {
-             alert("Kujdes: Hyrja me Google nuk është e aktivizuar në Firebase!\n\nJu lutem shkoni tek Firebase Console -> Authentication -> Sign-in method dhe aktivizoni 'Google'.");
-         } else {
-             alert("Gabim gjatë hyrjes me Google:\n" + err.message + "\n\nNëse jeni në APK/Android, përdorni 'Aktivizo Cloud Menjëherë (Fast Cloud)' ose Email/Password për të qëndruar brenda aplikacionit APK!");
          }
       }
   };
@@ -1857,6 +1861,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
              setTimeout(() => forceCloudBackup(), 1500);
           }
       } catch (err: any) {
+          console.error("Anonymous auth err:", err);
+          setAuthError({ code: err.code || 'unknown', message: err.message, provider: 'anonymous' });
           showToast("Gabim gjatë lidhjes me Cloud: " + err.message);
       }
   };
@@ -3880,6 +3886,119 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                          </div>
                       ) : (
                          <div className="space-y-4 text-left">
+                            {authError && (
+                               <div className="p-3.5 rounded-xl border border-red-500/30 bg-red-500/5 text-left space-y-3">
+                                  <div className="flex items-start gap-2.5">
+                                     <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                                     <div className="flex-1">
+                                        <h4 className="text-xs font-extrabold uppercase tracking-wider text-red-400">
+                                           {t('GABIM GJATË AUTENTIKIMIT', 'AUTHENTICATION ERROR')}
+                                        </h4>
+                                        <p className="text-[11px] font-mono text-zinc-400 mt-1 break-all bg-black/25 p-2 rounded border border-zinc-800/40">
+                                           Code: {authError.code}<br/>
+                                           {authError.message}
+                                        </p>
+                                     </div>
+                                  </div>
+
+                                  {/* Actionable Solution Steps */}
+                                  <div className="p-3 rounded-lg bg-zinc-950/70 border border-zinc-800 text-xs space-y-2 text-zinc-300">
+                                     <p className="font-bold text-amber-400 flex items-center gap-1.5">
+                                        🔧 {t('Si ta rregulloni këtë problem:', 'How to resolve this issue:')}
+                                     </p>
+                                     
+                                     {authError.code === 'auth/operation-not-allowed' && authError.provider === 'email' && (
+                                        <div className="space-y-1.5">
+                                           <p className="font-medium text-zinc-200">
+                                              {t('Lidhja me Email/Password nuk është e aktivizuar në Firebase për projektin tuaj.', 'Email/Password authentication is not enabled in your Firebase project.')}
+                                           </p>
+                                           <ol className="list-decimal pl-4.5 space-y-1 text-[11px] text-zinc-400">
+                                              <li>{t('Hapni Firebase Console duke përdorur butonin më poshtë.', 'Open the Firebase Console using the button below.')}</li>
+                                              <li>{t('Shkoni tek seksioni "Authentication" (majtas) dhe klikoni tab-in "Sign-in method".', 'Go to the "Authentication" section (left sidebar) and click the "Sign-in method" tab.')}</li>
+                                              <li>{t('Klikoni "Add new provider", zgjidhni "Email/Password", aktivizojeni atë dhe klikoni "Save".', 'Click "Add new provider", select "Email/Password", toggle it to Enabled, and click "Save".')}</li>
+                                           </ol>
+                                        </div>
+                                     )}
+
+                                     {authError.code === 'auth/operation-not-allowed' && authError.provider === 'google' && (
+                                        <div className="space-y-1.5">
+                                           <p className="font-medium text-zinc-200">
+                                              {t('Lidhja me Google nuk është e aktivizuar në Firebase për projektin tuaj.', 'Google sign-in is not enabled in your Firebase project.')}
+                                           </p>
+                                           <ol className="list-decimal pl-4.5 space-y-1 text-[11px] text-zinc-400">
+                                              <li>{t('Hapni Firebase Console duke përdorur butonin më poshtë.', 'Open the Firebase Console using the button below.')}</li>
+                                              <li>{t('Shkoni tek seksioni "Authentication" (majtas) dhe klikoni tab-in "Sign-in method".', 'Go to the "Authentication" section (left sidebar) and click the "Sign-in method" tab.')}</li>
+                                              <li>{t('Aktivizoni ofruesin "Google", vendosni email-in tuaj mbështetës të projektit dhe klikoni "Save".', 'Enable the "Google" provider, select your project support email, and click "Save".')}</li>
+                                           </ol>
+                                        </div>
+                                     )}
+
+                                     {authError.code === 'auth/admin-restricted-operation' && authError.provider === 'anonymous' && (
+                                        <div className="space-y-1.5">
+                                           <p className="font-medium text-zinc-200">
+                                              {t('Hyrja e Shpejtë (Anonymous) nuk është e aktivizuar në Firebase për projektin tuaj.', 'Fast Login (Anonymous) is not enabled in your Firebase project.')}
+                                           </p>
+                                           <ol className="list-decimal pl-4.5 space-y-1 text-[11px] text-zinc-400">
+                                              <li>{t('Hapni Firebase Console.', 'Open the Firebase Console.')}</li>
+                                              <li>{t('Shkoni tek seksioni "Authentication" -> "Sign-in method".', 'Go to the "Authentication" -> "Sign-in method" section.')}</li>
+                                              <li>{t('Shtoni dhe aktivizoni ofruesin "Anonymous" dhe klikoni "Save".', 'Add and enable the "Anonymous" provider and click "Save".')}</li>
+                                           </ol>
+                                        </div>
+                                     )}
+
+                                     {authError.code === 'auth/unauthorized-domain' && (
+                                        <div className="space-y-1.5">
+                                           <p className="font-medium text-zinc-200">
+                                              {t('Domeni i tanishëm nuk është i autorizuar në Firebase për hyrje me Google!', 'This current domain is not authorized in Firebase for Google Sign-In!')}
+                                           </p>
+                                           <p className="text-[11px] text-zinc-400">
+                                              {t('Kur jeni brenda një aplikacioni native Android APK, kjo zakonisht ndodh sepse provoni të përdorni popup në vend të hyrjes native Google ose nuk keni konfiguruar kodet SHA-1/SHA-256 në Firebase.', 'When running inside a native Android APK, this usually happens when trying to use web popup fallback instead of native Google login, or when SHA-1/SHA-256 fingerprints are missing in Firebase.')}
+                                           </p>
+                                           <ol className="list-decimal pl-4.5 space-y-1 text-[11px] text-zinc-400">
+                                              <li>{t('Për aplikacionet APK, përdorni Email/Password që të mos keni nevojë për Chrome ose Popup!', 'For APK apps, we highly recommend using Email/Password so you do not need Chrome or Popup fallbacks!')}</li>
+                                              <li>{t('Nëse dëshironi ta lejoni në web: Shkoni tek Firebase Console -> Authentication -> Settings -> Authorized domains dhe shtoni domenin tuaj.', 'If you want to allow web login: Go to Firebase Console -> Authentication -> Settings -> Authorized domains and add your current domain.')}</li>
+                                           </ol>
+                                        </div>
+                                     )}
+
+                                     {/* Default/Other Firebase Error guidance */}
+                                     {authError.code !== 'auth/operation-not-allowed' && authError.code !== 'auth/admin-restricted-operation' && authError.code !== 'auth/unauthorized-domain' && (
+                                        <div className="space-y-1.5">
+                                           <p className="font-medium text-zinc-200">
+                                              {t('Rekomandime për zgjidhje:', 'Troubleshooting recommendations:')}
+                                           </p>
+                                           <ul className="list-disc pl-4.5 space-y-1 text-[11px] text-zinc-400">
+                                              <li>{t('Sigurohuni që keni lidhje interneti të qëndrueshme në pajisje.', 'Ensure you have a stable internet connection on your device.')}</li>
+                                              <li>{t('Për stabilitet maksimal brenda APK (Android), gjithmonë preferoni hyrjen me Email/Password.', 'For maximum stability inside APK (Android), always prefer using Email/Password sign-in.')}</li>
+                                           </ul>
+                                        </div>
+                                     )}
+
+                                     {/* Direct Quick Link to Firebase Console */}
+                                     <div className="pt-2 border-t border-zinc-800 flex flex-wrap gap-3">
+                                        <a
+                                           href="https://console.firebase.google.com/project/gen-lang-client-0285886461/authentication/providers"
+                                           target="_blank"
+                                           rel="noopener noreferrer"
+                                           className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition-all underline shrink-0"
+                                        >
+                                           🚀 {t('Hap Ofruesit në Firebase Console', 'Open Firebase Console Providers')}
+                                        </a>
+                                     </div>
+                                  </div>
+
+                                  <div className="flex justify-end">
+                                     <button
+                                        type="button"
+                                        onClick={() => setAuthError(null)}
+                                        className="text-[10px] font-bold text-zinc-400 hover:text-white px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition-all uppercase tracking-wider"
+                                     >
+                                        {t('Pastro Gabimin', 'Clear Error')}
+                                     </button>
+                                  </div>
+                               </div>
+                            )}
+
                             {/* Tabs to switch between Sign In and Sign Up */}
                             <div className="flex border-b border-zinc-800/20 pb-2">
                                <button
