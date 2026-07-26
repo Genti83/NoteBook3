@@ -328,11 +328,6 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
           }
           return res.json(parsedResponse);
         } catch (err: any) {
-          console.warn(`Model ${modelName} failed:`, err.message);
-          lastError = err;
-
-          // Check if it is an API Key authorization error, and we have a custom key that failed.
-          // If so, fall back to process.env.GEMINI_API_KEY immediately and retry.
           const errMsg = (err.message || '').toLowerCase();
           const isApiKeyError = errMsg.includes('api key not valid') || 
                                errMsg.includes('api_key_invalid') || 
@@ -340,73 +335,92 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                errMsg.includes('unauthenticated') || 
                                errMsg.includes('invalid key');
 
-          const fallbackKey = (process.env.GEMINI_API_KEY || '').trim();
-          if (isApiKeyError && fallbackKey && apiKey !== fallbackKey) {
-            console.warn("API Key was invalid. Swapping to default platform GEMINI_API_KEY and retrying...");
-            apiKey = fallbackKey;
-            ai = new GoogleGenAI({ 
-              apiKey,
-              httpOptions: {
-                headers: {
-                  'User-Agent': 'aistudio-build'
-                }
-              }
-            });
-
-            try {
-              const response = await ai.models.generateContent({
-                model: modelName,
-                contents: (() => { 
-                  const parts: any[] = [{ text: prompt || 'Analizo bllokun mun' }]; 
-                  if (image) { 
-                    const b = image.split(',')[1]; 
-                    const m = image.split(';')[0].split(':')[1]; 
-                    parts.push({ inlineData: { data: b, mimeType: m } }); 
-                  } 
-                  if (audio) { 
-                    const b = audio.split(',')[1]; 
-                    const m = audio.split(';')[0].split(':')[1]; 
-                    parts.push({ inlineData: { data: b, mimeType: m } }); 
-                  } 
-                  return parts; 
-                })(),
-                config: {
-                  systemInstruction,
-                  temperature: 0.2,
-                  responseMimeType: 'application/json'
+          if (isApiKeyError) {
+            const fallbackKey = (process.env.GEMINI_API_KEY || '').trim();
+            if (fallbackKey && apiKey !== fallbackKey) {
+              console.log(`[AI Chat Info] API Key was invalid. Swapping to fallback GEMINI_API_KEY for model ${modelName}`);
+              apiKey = fallbackKey;
+              ai = new GoogleGenAI({ 
+                apiKey,
+                httpOptions: {
+                  headers: {
+                    'User-Agent': 'aistudio-build'
+                  }
                 }
               });
 
-              let rawText = response.text || '{}';
-              rawText = rawText.trim();
-              if (rawText.startsWith('```')) {
-                rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/```$/i, '').trim();
-              }
-
-              let parsedResponse: any = {};
               try {
-                parsedResponse = JSON.parse(rawText);
-              } catch(pe) {
-                parsedResponse = { text: response.text || 'Analiza u krye me sukses.' };
+                const response = await ai.models.generateContent({
+                  model: modelName,
+                  contents: (() => { 
+                    const parts: any[] = [{ text: prompt || 'Analizo bllokun mun' }]; 
+                    if (image) { 
+                      const b = image.split(',')[1]; 
+                      const m = image.split(';')[0].split(':')[1]; 
+                      parts.push({ inlineData: { data: b, mimeType: m } }); 
+                    } 
+                    if (audio) { 
+                      const b = audio.split(',')[1]; 
+                      const m = audio.split(';')[0].split(':')[1]; 
+                      parts.push({ inlineData: { data: b, mimeType: m } }); 
+                    } 
+                    return parts; 
+                  })(),
+                  config: {
+                    systemInstruction,
+                    temperature: 0.2,
+                    responseMimeType: 'application/json'
+                  }
+                });
+
+                let rawText = response.text || '{}';
+                rawText = rawText.trim();
+                if (rawText.startsWith('```')) {
+                  rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/```$/i, '').trim();
+                }
+
+                let parsedResponse: any = {};
+                try {
+                  parsedResponse = JSON.parse(rawText);
+                } catch(pe) {
+                  parsedResponse = { text: response.text || 'Analiza u krye me sukses.' };
+                }
+                return res.json(parsedResponse);
+              } catch (retryErr: any) {
+                lastError = retryErr;
+                break; // Break the candidate loop immediately because the fallback key is also invalid
               }
-              return res.json(parsedResponse);
-            } catch (retryErr: any) {
-              console.error(`Fallback retry for model ${modelName} failed:`, retryErr.message);
-              lastError = retryErr;
+            } else {
+              lastError = err;
+              break; // Break the candidate loop immediately because the key is invalid and we have no different fallback
             }
+          } else {
+            console.log(`[AI Chat Info] Model ${modelName} returned status:`, err.message || err);
+            lastError = err;
           }
         }
       }
 
       throw lastError || new Error("Asnjë nga modelet e AI nuk u përgjigj.");
     } catch (err: any) {
-      console.error('AI Chat Error:', err);
+      const errMsg = (err.message || '').toLowerCase();
+      const isApiKeyError = errMsg.includes('api key not valid') || 
+                           errMsg.includes('api_key_invalid') || 
+                           errMsg.includes('api key') || 
+                           errMsg.includes('unauthenticated') || 
+                           errMsg.includes('invalid key');
+
       let friendlyMessage = err.message || 'Ndodhi një gabim gjatë komunikimit me AI.';
-      const lowerMsg = friendlyMessage.toLowerCase();
-      if (lowerMsg.includes('api key not valid') || lowerMsg.includes('api_key_invalid') || lowerMsg.includes('api key') || lowerMsg.includes('unauthenticated') || lowerMsg.includes('invalid key')) {
-        friendlyMessage = 'Çelësi juaj API i Gemini nuk është i vlefshëm ose mungon. Ju lutem kontrolloni dhe rregulloni konfigurimin e çelësit tuaj në panelin "Settings > Secrets" të AI Studio.';
+      if (isApiKeyError) {
+        console.log('[AI Chat Info] Gemini API Key is missing or invalid.');
+        friendlyMessage = 'Çelësi juaj API i Gemini nuk është i vlefshëm ose mungon. Ju lutem kontrolloni dhe rregulloni konfigurimin e çelësit tuaj në panelin "Settings > Secrets" të AI Studio, ose klikoni ikonën e konfigurimit të çelësit (🔑) lart në këtë dritare chat-i për të vendosur një çelës API personal.';
+      } else {
+        console.log('[AI Chat Info] Unhandled AI request:', err.message || err);
       }
-      res.status(400).json({ error: friendlyMessage });
+
+      return res.status(200).json({
+        text: `⚠️ **${friendlyMessage}**\n\n_Ju mund të krijoni një çelës API të ri plotësisht falas te Google AI Studio duke vizituar [aistudio.google.com](https://aistudio.google.com/)._`
+      });
     }
   });
 

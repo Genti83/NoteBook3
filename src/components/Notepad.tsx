@@ -1592,18 +1592,12 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
         if (result && result.user) {
             localStorage.setItem('grid_cloud_sync_freq', '5000');
             setCloudSyncFrequency(5000);
+            localStorage.setItem('grid_notepad_logged_in_provider', 'google');
             localStorage.removeItem('grid_notepad_custom_uid');
             showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
             setTimeout(() => forceCloudBackup(), 1500);
         }
     }).catch(console.error);
-
-    // Auto-login fallback for Capacitor environments that might wipe IndexedDB
-    const savedEmail = localStorage.getItem('grid_notepad_saved_email');
-    const savedPwd = localStorage.getItem('grid_notepad_saved_pwd');
-    if (savedEmail && savedPwd && !auth.currentUser) {
-        signInWithEmailAndPassword(auth, savedEmail, savedPwd).catch(() => {});
-    }
 
     const savedPassword = localStorage.getItem('grid_notepad_pin');
     if (savedPassword) {
@@ -1617,13 +1611,37 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
     if (savedSecretList) {
        try { setSecretList(JSON.parse(savedSecretList)); } catch(e){}
     }
-
-
-
-
-
-// Auth data fetching now driven by useFirebase hook user state
   }, []);
+
+  // Intelligent, resilient session auto-restoration
+  useEffect(() => {
+     if (!loading && !user) {
+         const lastProvider = localStorage.getItem('grid_notepad_logged_in_provider');
+         if (lastProvider === 'email') {
+             const savedEmail = localStorage.getItem('grid_notepad_saved_email');
+             const savedPwd = localStorage.getItem('grid_notepad_saved_pwd');
+             if (savedEmail && savedPwd) {
+                 appendDebugLog(`🔄 [Session Restore] Po rilidhemi me Email/Password: ${savedEmail}`);
+                 hookEmailLogin(savedEmail, savedPwd)
+                     .then(() => {
+                         showToast("Lidhja me llogarinë tuaj u rikthye automatikisht!");
+                     })
+                     .catch((err) => {
+                         appendDebugLog(`⚠️ [Session Restore] Rilidhja me email dështoi: ${err.message}`);
+                     });
+             }
+         } else if (lastProvider === 'anonymous') {
+             appendDebugLog(`🔄 [Session Restore] Po rilidhemi me Hyrje të Shpejtë (Anonym)`);
+             hookAnonymousLogin()
+                 .then(() => {
+                     showToast("Hyrja e Shpejtë u rikthye automatikisht!");
+                 })
+                 .catch((err) => {
+                     appendDebugLog(`⚠️ [Session Restore] Rilidhja me Hyrje të Shpejtë dështoi: ${err.message}`);
+                 });
+         }
+     }
+  }, [loading, user]);
 
   useEffect(() => {
      if (user) {
@@ -3964,16 +3982,33 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                      )}
 
                                      {authError.code === 'auth/unauthorized-domain' && (
-                                        <div className="space-y-1.5">
+                                        <div className="space-y-2">
                                            <p className="font-medium text-zinc-200">
-                                              {t('Domeni i tanishëm nuk është i autorizuar në Firebase për hyrje me Google!', 'This current domain is not authorized in Firebase for Google Sign-In!')}
+                                              {t('Domeni i tanishëm nuk është i autorizuar në Firebase!', 'This current domain is not authorized in Firebase!')}
                                            </p>
-                                           <p className="text-[11px] text-zinc-400">
-                                              {t('Kur jeni brenda një aplikacioni native Android APK, kjo zakonisht ndodh sepse provoni të përdorni popup në vend të hyrjes native Google ose nuk keni konfiguruar kodet SHA-1/SHA-256 në Firebase.', 'When running inside a native Android APK, this usually happens when trying to use web popup fallback instead of native Google login, or when SHA-1/SHA-256 fingerprints are missing in Firebase.')}
+                                           <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 space-y-1.5 text-[11px]">
+                                              <p className="text-zinc-400 font-bold uppercase tracking-wider">{t('Domeni që duhet të shtoni:', 'Domain to add:')}</p>
+                                              <div className="flex items-center justify-between gap-2 bg-black/40 px-2 py-1.5 rounded border border-zinc-800">
+                                                 <code className="text-amber-400 font-mono select-all break-all">{window.location.hostname}</code>
+                                                 <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                       navigator.clipboard.writeText(window.location.hostname);
+                                                       showToast(t("Domeni u kopjua!", "Domain copied!"));
+                                                    }}
+                                                    className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded text-[10px] uppercase transition-all"
+                                                 >
+                                                    {t("Kopjo", "Copy")}
+                                                 </button>
+                                              </div>
+                                           </div>
+                                           <p className="text-[11px] text-zinc-400 leading-relaxed">
+                                              {t('Ky gabim (The requested action is invalid) ndodh sepse domeni ku po ekzekutoni aplikacionin nuk është i regjistruar në listën e domeneve të lejuara (Authorized Domains) të Firebase.', 'This error (The requested action is invalid) occurs because the domain where you are running the app is not registered in the Firebase Authorized Domains list.')}
                                            </p>
                                            <ol className="list-decimal pl-4.5 space-y-1 text-[11px] text-zinc-400">
-                                              <li>{t('Për aplikacionet APK, përdorni Email/Password që të mos keni nevojë për Chrome ose Popup!', 'For APK apps, we highly recommend using Email/Password so you do not need Chrome or Popup fallbacks!')}</li>
-                                              <li>{t('Nëse dëshironi ta lejoni në web: Shkoni tek Firebase Console -> Authentication -> Settings -> Authorized domains dhe shtoni domenin tuaj.', 'If you want to allow web login: Go to Firebase Console -> Authentication -> Settings -> Authorized domains and add your current domain.')}</li>
+                                              <li>{t('Klikoni butonin e gjelbër më poshtë për të hapur Firebase Console.', 'Click the green button below to open Firebase Console.')}</li>
+                                              <li>{t('Shkoni tek Authentication -> Settings -> Authorized domains.', 'Go to Authentication -> Settings -> Authorized domains.')}</li>
+                                              <li>{t('Shtoni domenin e kopjuar më sipër dhe klikoni Save.', 'Add the copied domain above and click Save.')}</li>
                                            </ol>
                                         </div>
                                      )}
