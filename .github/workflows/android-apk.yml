@@ -69,8 +69,7 @@ jobs:
         run: |
           mkdir -p android/app
           if [ ! -f "android/app/google-services.json" ]; then
-            cat << 'EOF' > android/app/google-services.json
-            {
+            echo '{
               "project_info": {
                 "project_number": "763941768009",
                 "project_id": "gen-lang-client-0285886461",
@@ -103,8 +102,7 @@ jobs:
                 }
               ],
               "configuration_version": "1"
-            }
-            EOF
+            }' > android/app/google-services.json
             echo "Successfully generated google-services.json for Firebase compilation!"
           else
             echo "google-services.json already exists!"
