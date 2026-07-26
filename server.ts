@@ -143,6 +143,14 @@ async function startServer() {
           apiKey = db[key].geminiKey.trim();
         }
       }
+
+      // Check if user-supplied key has the valid Google API key structure (starts with AIzaSy).
+      // Discard it if it does not, to immediately fall back to the platform key.
+      if (apiKey && !apiKey.startsWith('AIzaSy')) {
+        console.warn(`Ignoring non-Google format API key: ${apiKey.slice(0, 10)}...`);
+        apiKey = '';
+      }
+
       if (!apiKey) {
         apiKey = (process.env.GEMINI_API_KEY || '').trim();
       }
@@ -153,9 +161,16 @@ async function startServer() {
         });
       }
 
-      const ai = new GoogleGenAI({ apiKey });
+      let ai = new GoogleGenAI({ 
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build'
+          }
+        }
+      });
 
-      const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË (përfshirë ato manuale, të nenvizuara dhe ato në Cloud për llogarinë ${userEmail || 'genti8319@gmail.com'}).
+      const systemInstruction = `Ti je një asistent AI për një aplikacion Bllok/Notepad, i jepur pas llogaritjeve, analizës inteligjente, matematikës dhe përmbledhjeve të çdo lloj blloku që përdoruesi krijon. Përdoruesi po të jep akses të plotë tek TË GJITHA DOKUMENTAT në PLATFORMË (përfshirë ato manuale, të nenvizuara dhe ato në Cloud për llogarinë ${userEmail || 'genti8319@gmail.com'}).
 Këtu janë të dhënat e dokumenteve aktualë në formatin JSON:
 ${JSON.stringify(documents, null, 2)}
 
@@ -241,6 +256,71 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
         } catch (err: any) {
           console.warn(`Model ${modelName} failed:`, err.message);
           lastError = err;
+
+          // Check if it is an API Key authorization error, and we have a custom key that failed.
+          // If so, fall back to process.env.GEMINI_API_KEY immediately and retry.
+          const errMsg = (err.message || '').toLowerCase();
+          const isApiKeyError = errMsg.includes('api key not valid') || 
+                               errMsg.includes('api_key_invalid') || 
+                               errMsg.includes('api key') || 
+                               errMsg.includes('unauthenticated') || 
+                               errMsg.includes('invalid key');
+
+          const fallbackKey = (process.env.GEMINI_API_KEY || '').trim();
+          if (isApiKeyError && fallbackKey && apiKey !== fallbackKey) {
+            console.warn("API Key was invalid. Swapping to default platform GEMINI_API_KEY and retrying...");
+            apiKey = fallbackKey;
+            ai = new GoogleGenAI({ 
+              apiKey,
+              httpOptions: {
+                headers: {
+                  'User-Agent': 'aistudio-build'
+                }
+              }
+            });
+
+            try {
+              const response = await ai.models.generateContent({
+                model: modelName,
+                contents: (() => { 
+                  const parts: any[] = [{ text: prompt || 'Analizo bllokun mun' }]; 
+                  if (image) { 
+                    const b = image.split(',')[1]; 
+                    const m = image.split(';')[0].split(':')[1]; 
+                    parts.push({ inlineData: { data: b, mimeType: m } }); 
+                  } 
+                  if (audio) { 
+                    const b = audio.split(',')[1]; 
+                    const m = audio.split(';')[0].split(':')[1]; 
+                    parts.push({ inlineData: { data: b, mimeType: m } }); 
+                  } 
+                  return parts; 
+                })(),
+                config: {
+                  systemInstruction,
+                  temperature: 0.2,
+                  responseMimeType: 'application/json'
+                }
+              });
+
+              let rawText = response.text || '{}';
+              rawText = rawText.trim();
+              if (rawText.startsWith('```')) {
+                rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/```$/i, '').trim();
+              }
+
+              let parsedResponse: any = {};
+              try {
+                parsedResponse = JSON.parse(rawText);
+              } catch(pe) {
+                parsedResponse = { text: response.text || 'Analiza u krye me sukses.' };
+              }
+              return res.json(parsedResponse);
+            } catch (retryErr: any) {
+              console.error(`Fallback retry for model ${modelName} failed:`, retryErr.message);
+              lastError = retryErr;
+            }
+          }
         }
       }
 
