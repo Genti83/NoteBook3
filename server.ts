@@ -26,6 +26,52 @@ function writeCloudDb(db: Record<string, any>) {
   }
 }
 
+function getVerifiedUser(req: express.Request): { uid: string; email?: string } | null {
+  try {
+    const authHeader = req.headers.authorization;
+    let token = '';
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    } else if (req.body && req.body.idToken) {
+      token = req.body.idToken;
+    } else if (req.query && req.query.idToken) {
+      token = req.query.idToken as string;
+    }
+
+    if (!token) return null;
+
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+    const now = Math.floor(Date.now() / 1000);
+
+    const expectedIss = 'https://securetoken.google.com/gen-lang-client-0285886461';
+    const expectedAud = 'gen-lang-client-0285886461';
+
+    if (payload.iss !== expectedIss) {
+      console.warn('JWT Issuer mismatch:', payload.iss);
+      return null;
+    }
+    if (payload.aud !== expectedAud) {
+      console.warn('JWT Audience mismatch:', payload.aud);
+      return null;
+    }
+    if (payload.exp < now) {
+      console.warn('JWT Token expired:', payload.exp, now);
+      return null;
+    }
+
+    return {
+      uid: payload.sub || payload.user_id,
+      email: payload.email
+    };
+  } catch (e) {
+    console.error('Error parsing JWT token:', e);
+    return null;
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -46,10 +92,16 @@ async function startServer() {
   // Google Cloud Storage API Endpoints
   app.post('/api/cloud/sync', (req, res) => {
     try {
-      const { userId, documents, activeDocId, blueText, secretList, pin, gistToken, gistId } = req.body;
-      const key = (userId || 'default_user').trim().toLowerCase();
+      // Enforce authentication
+      const verified = getVerifiedUser(req);
+      if (!verified) {
+         return res.status(401).json({ success: false, error: 'Ju lutemi kyçuni me Email/Fjalëkalim ose me Google për të sinkronizuar të dhënat.' });
+      }
+
+      const { documents, activeDocId, blueText, secretList, pin, gistToken, gistId } = req.body;
+      const key = (verified.email || verified.uid).toLowerCase();
+
       const db = readCloudDb();
-      
       const lastUpdated = new Date().toISOString();
       db[key] = {
         documents: documents || [],
@@ -88,7 +140,13 @@ async function startServer() {
 
   app.get('/api/cloud/load', (req, res) => {
     try {
-      const userId = (req.query.userId as string || 'default_user').trim().toLowerCase();
+      // Enforce authentication
+      const verified = getVerifiedUser(req);
+      if (!verified) {
+         return res.status(401).json({ success: false, error: 'Ju lutemi kyçuni me Email/Fjalëkalim ose me Google për të shkarkuar të dhënat.' });
+      }
+      const userId = (verified.email || verified.uid).toLowerCase();
+
       const db = readCloudDb();
       const record = db[userId];
       if (!record || !record.documents) {
@@ -113,7 +171,13 @@ async function startServer() {
 
   app.get('/api/cloud/status', (req, res) => {
     try {
-      const userId = (req.query.userId as string || 'default_user').trim().toLowerCase();
+      // Enforce authentication
+      const verified = getVerifiedUser(req);
+      if (!verified) {
+         return res.status(401).json({ success: false, error: 'Kërkohet autorizim. Ju lutemi kyçuni në llogari.' });
+      }
+      const userId = (verified.email || verified.uid).toLowerCase();
+
       const db = readCloudDb();
       const record = db[userId];
       return res.json({
@@ -136,11 +200,14 @@ async function startServer() {
 
       // Robust Multi-tier API Key Resolution
       let apiKey = (geminiKey || '').trim();
-      if (!apiKey && userEmail) {
-        const key = userEmail.trim().toLowerCase();
-        const db = readCloudDb();
-        if (db[key] && db[key].geminiKey) {
-          apiKey = db[key].geminiKey.trim();
+      if (!apiKey) {
+        const verified = getVerifiedUser(req);
+        const activeUserKey = verified ? (verified.email || verified.uid).toLowerCase() : (userEmail || '').trim().toLowerCase();
+        if (activeUserKey) {
+          const db = readCloudDb();
+          if (db[activeUserKey] && db[activeUserKey].geminiKey) {
+            apiKey = db[activeUserKey].geminiKey.trim();
+          }
         }
       }
 
@@ -182,11 +249,13 @@ ${JSON.stringify(secretList || [], null, 2)}
 
 Dokumenti aktual aktiv që përdoruesi po shikon është me ID: "${activeDocId}". Ofroni përgjigjen duke u bazuar plotësisht në KËTË DOKUMENT.
 
-Përdoruesi gjithashtu kërkon që kur bën shënime, nenvizime apo korrigjime manuale, ti si AI të jesh në sinkron të plotë dhe të kryesh përditësime në dokumentet e tij nëse kërkohet përmes aksioneve tona të strukturuara JSON.
+Përdoruesi gjithashtu kërkon që kur bën shënime, nenvizime apo korrigjime manuale, ose kur verifikohen dublikatat, ti si AI të jesh në sinkron të plotë dhe të kryesh përditësime në dokumentet e tij nëse kërkohet përmes aksioneve tona të strukturuara JSON.
+
+Nëse përdoruesi kërkon të pastrojë ose të verifikojë dublikatat, ose nëse detekton dokumente krejtësisht identike (apo me të njëjtin titull dhe përmbajtje rreshtash të dubluar), kthe veprimin "DELETE_DOCUMENT" për dokumentet që duhen hequr (prefero të mbash më të riun ose më të plotësuarin). Nëse ka rreshta të dubluar brenda një dokumenti të vetëm, kthe veprimin "UPDATE_DOCUMENT_ROWS" me rreshtat e pastruar.
 
 TI GJITHMONË DUHET TË KTHESH PËRGJIGJEN TËNDE NË FORMATIN JSON SI MË POSHTË:
 {
-  "text": "Teksti i përgjigjes tënde për përdoruesin dhe/ose raporti i llogaritjeve",
+  "text": "Teksti i përgjigjes tënde për përdoruesin, psh. raporti i pastrimit të dublikatave apo korrigjimeve.",
   "actions": [
     {
        "type": "PROPOSE_COLUMNS_CHANGE",
@@ -199,6 +268,11 @@ TI GJITHMONË DUHET TË KTHESH PËRGJIGJEN TËNDE NË FORMATIN JSON SI MË POSHT
        "type": "UPDATE_DOCUMENT_ROWS",
        "documentId": "id_e_dokumentit_qe_po_ndryshon",
        "newRows": []
+    },
+    {
+       "type": "DELETE_DOCUMENT",
+       "documentId": "id_e_dokumentit_qe_duhet_fshire",
+       "title": "Titulli i dokumentit të fshirë si dublikatë"
     }
   ]
 }

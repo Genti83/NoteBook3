@@ -537,19 +537,28 @@ export function Notepad() {
   const fileInputBackupRef = useRef<HTMLInputElement | null>(null);
 
   const handleUnifiedCloudSync = async () => {
-     const mail = (email || localStorage.getItem('grid_notepad_saved_email') || localStorage.getItem('grid_notepad_user_account') || 'genti8319@gmail.com').trim();
-     localStorage.setItem('grid_notepad_saved_email', mail);
-     localStorage.setItem('grid_notepad_user_account', mail);
+     if (!user) {
+        showToast("Ju lutem kyçuni me Email/Password ose Google për të sinkronizuar të dhënat.");
+        setAuthModal(true);
+        return;
+     }
+     const mail = getActiveUid()!;
      
      showToast("⚡ Duke u lidhur me Google Cloud...");
 
      // 1. Fetch current cloud database state
+     const idToken = auth.currentUser ? await auth.currentUser.getIdToken(true).catch(() => null) : null;
      const endpoints = getApiEndpoints(`/api/cloud/load?userId=${encodeURIComponent(mail)}`);
      let cloudData: any = null;
 
      for (const ep of endpoints) {
         try {
-           const res = await fetch(ep);
+           const headers: Record<string, string> = {};
+           if (idToken) {
+              headers['Authorization'] = `Bearer ${idToken}`;
+           }
+           const finalEp = idToken ? `${ep}&idToken=${encodeURIComponent(idToken)}` : ep;
+           const res = await fetch(finalEp, { headers });
            if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
               const json = await res.json();
               if (json && json.success) {
@@ -761,7 +770,7 @@ export function Notepad() {
   };
 
   const getActiveUid = () => {
-     return user?.uid || user?.email || localStorage.getItem('grid_notepad_saved_email') || localStorage.getItem('grid_notepad_user_account') || 'genti8319@gmail.com';
+     return user ? (user.email || user.uid).toLowerCase() : null;
   };
 
   const getApiEndpoints = (path: string): string[] => {
@@ -1270,7 +1279,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
     
     appendDebugLog(`☁️ [Google Cloud Sync] Po ngarkohen ${docs.length} dokumente për përdoruesin: ${uid}`);
 
-    const payload = JSON.stringify({
+    const idToken = auth.currentUser ? await auth.currentUser.getIdToken(true).catch(() => null) : null;
+    const payloadObj: any = {
       userId: uid,
       documents: docs,
       blueText: finalBlueText,
@@ -1279,7 +1289,11 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       gistToken: gistToken || localStorage.getItem('grid_notepad_gist_token') || null,
       gistId: gistId || localStorage.getItem('grid_notepad_gist_id') || null,
       geminiKey: userGeminiKey || localStorage.getItem('grid_notepad_gemini_key') || null
-    });
+    };
+    if (idToken) {
+      payloadObj.idToken = idToken;
+    }
+    const payload = JSON.stringify(payloadObj);
 
     const endpoints = getApiEndpoints('/api/cloud/sync');
 
@@ -1287,9 +1301,13 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
     for (const ep of endpoints) {
       appendDebugLog(`📡 [Google Cloud Sync] Po provohet lidhja me endpoint: ${ep}`);
       try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (idToken) {
+          headers['Authorization'] = `Bearer ${idToken}`;
+        }
         const res = await fetch(ep, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: payload
         });
         const contentType = res.headers.get('content-type') || '';
@@ -1439,16 +1457,29 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
   const loadFromGoogleCloud = async (silent = false) => {
     setIsFetchingCloud(true);
-    const uid = getActiveUid() || 'genti8319@gmail.com';
+    if (!user) {
+       setIsFetchingCloud(false);
+       if (!silent) {
+          showToast("Ju lutem kyçuni me Email/Password ose Google për të shkarkuar të dhënat.");
+       }
+       return false;
+    }
+    const uid = getActiveUid()!;
     appendDebugLog(`☁️ [Google Cloud Load] Po shkarkohen dokumentet nga serveri për: ${uid}`);
 
+    const idToken = auth.currentUser ? await auth.currentUser.getIdToken(true).catch(() => null) : null;
     const endpoints = getApiEndpoints(`/api/cloud/load?userId=${encodeURIComponent(uid)}`);
 
     let loadedData: any = null;
     for (const ep of endpoints) {
       appendDebugLog(`📡 [Google Cloud Load] Po kërkohet nga endpoint: ${ep}`);
       try {
-        const res = await fetch(ep);
+        const headers: Record<string, string> = {};
+        if (idToken) {
+          headers['Authorization'] = `Bearer ${idToken}`;
+        }
+        const finalEp = idToken ? `${ep}&idToken=${encodeURIComponent(idToken)}` : ep;
+        const res = await fetch(finalEp, { headers });
         const contentType = res.headers.get('content-type') || '';
         if (res.ok && contentType.includes('application/json')) {
           const json = await res.json();
@@ -1587,6 +1618,46 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
   useEffect(() => {
      if (user) {
+         const fetchCloudSettings = async () => {
+            try {
+               const uid = getActiveUid() || user.uid;
+               const settingsRef = doc(db, 'settings', uid);
+               const settingsSnap = await getDoc(settingsRef);
+               if (settingsSnap.exists()) {
+                  const data = settingsSnap.data();
+                  if (data) {
+                     appendDebugLog(`🔒 [Settings Load] U gjetën cilësimet e sigurisë në Firestore!`);
+                     if (data.blueText !== undefined) {
+                        setBlueText(data.blueText);
+                        localStorage.setItem('grid_notepad_blue', data.blueText);
+                     }
+                     if (data.secretList) {
+                        setSecretList(data.secretList);
+                        localStorage.setItem('grid_notepad_secret_list', JSON.stringify(data.secretList));
+                     }
+                     if (data.pin) {
+                        localStorage.setItem('grid_notepad_pin', data.pin);
+                     }
+                     if (data.gistToken) {
+                        setGistToken(data.gistToken);
+                        localStorage.setItem('grid_notepad_gist_token', data.gistToken);
+                     }
+                     if (data.gistId) {
+                        setGistId(data.gistId);
+                        localStorage.setItem('grid_notepad_gist_id', data.gistId);
+                     }
+                     if (data.geminiKey) {
+                        setUserGeminiKey(data.geminiKey);
+                        localStorage.setItem('grid_notepad_gemini_key', data.geminiKey);
+                     }
+                  }
+               }
+            } catch (err) {
+               console.error("Error loading settings from Firestore:", err);
+            }
+         };
+         fetchCloudSettings();
+
          const fetchCloudData = async () => {
            try {
                const q = query(collection(db, 'documents'), where('userId', '==', localStorage.getItem('grid_notepad_custom_uid') || user.uid));
@@ -1852,13 +1923,19 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
      const t = setTimeout(async () => {
         if (auth.currentUser && navigator.onLine) {
-           const blueRef = doc(db, 'settings', getActiveUid()!);
-           setDoc(blueRef, { 
-               blueText, 
-               secretList,
-               userId: getActiveUid()!, 
-               pin: localStorage.getItem('grid_notepad_pin') || null 
-           }, { merge: true }).catch(()=>{});
+           const uid = getActiveUid();
+           if (uid) {
+              const settingsRef = doc(db, 'settings', uid);
+              setDoc(settingsRef, { 
+                  blueText, 
+                  secretList,
+                  userId: uid, 
+                  pin: localStorage.getItem('grid_notepad_pin') || null,
+                  gistToken: gistToken || null,
+                  gistId: gistId || null,
+                  geminiKey: userGeminiKey || null
+              }, { merge: true }).catch(()=>{});
+           }
         }
         if (navigator.onLine) {
            await syncWithGoogleCloud(documents, true, blueText, secretList);
@@ -1868,7 +1945,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
      runAiAutopilot(documents, blueText);
 
      return () => clearTimeout(t);
-  }, [blueText, secretList]);
+  }, [blueText, secretList, userGeminiKey, gistToken, gistId]);
 
 
 
@@ -1971,6 +2048,17 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                              setRows(act.newRows);
                          }
                          showToast("⚡ Agjenti Gemini korrigjoi rreshtat e bllokut automatikisht!");
+                      } else if (act.type === 'DELETE_DOCUMENT' && act.documentId) {
+                          setDocuments(prevDocs => {
+                              const next = prevDocs.filter(d => d.id !== act.documentId);
+                              localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(next));
+                              syncWithGoogleCloud(next, true);
+                              return next;
+                          });
+                          if (act.documentId === activeDocIdRef.current) {
+                              setActiveDocId(null);
+                          }
+                          showToast(`⚡ Autopilot fshiu dokumentin e dubluar: ${act.title || act.documentId}`);
                      }
                  });
               } else {
@@ -2129,15 +2217,14 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
     }
   }, []);
 
-  // Auto-activate and sync Google Cloud on mount if saved email is present
+  // Auto-activate and sync Google Cloud on mount if authenticated and online
   useEffect(() => {
-     const savedMail = localStorage.getItem('grid_notepad_saved_email') || localStorage.getItem('grid_notepad_user_account');
-     if (savedMail && navigator.onLine) {
+     if (user && navigator.onLine) {
         setTimeout(() => {
            handleUnifiedCloudSync().catch(console.error);
         }, 1200);
      }
-  }, []);
+  }, [user]);
 
   // Auto-restore docs if empty on login (e.g. fresh phone install)
   useEffect(() => {
@@ -3769,37 +3856,42 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                    {/* Google Account Connection Input */}
                    <div className={`p-4 rounded-xl border space-y-3 ${isDark ? "bg-zinc-950/80 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
                       <label className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
-                         <User className="w-4 h-4" /> Llogaria Google me Akses në Cloud
+                         <User className="w-4 h-4" /> {t('Llogaria juaj në Cloud', 'Your Cloud Account')}
                       </label>
-                      <div className="flex flex-col sm:flex-row gap-2">
-                         <input
-                            type="email"
-                            value={email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com'}
-                            onChange={(e) => {
-                               const val = e.target.value;
-                               setEmail(val);
-                               localStorage.setItem('grid_notepad_saved_email', val);
-                               localStorage.setItem('grid_notepad_user_account', val);
-                            }}
-                            placeholder="Adresa e-mail Google (p.sh. genti8319@gmail.com)"
-                            className={`flex-1 px-3.5 py-2 rounded-xl border text-sm font-semibold outline-none transition-colors ${
-                                isDark ? "bg-zinc-900 border-zinc-700 text-white focus:border-emerald-500" : "bg-white border-zinc-300 text-zinc-900 focus:border-emerald-500"
-                            }`}
-                         />
-                         <button
-                            type="button"
-                            onClick={async () => {
-                               const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
-                               localStorage.setItem('grid_notepad_saved_email', mail);
-                               localStorage.setItem('grid_notepad_user_account', mail);
-                               showToast("Llogaria u ruajt përgjithmonë! Po sinkronizohen të dhënat...");
-                               await handleUnifiedCloudSync();
-                            }}
-                            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 shrink-0"
-                         >
-                            <Check className="w-4 h-4" /> Ruaj Llogarinë & Lidhu
-                         </button>
-                      </div>
+                      {user ? (
+                         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-lg bg-zinc-900/40 border border-zinc-800/40">
+                            <div className="flex items-center gap-2.5">
+                               <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                               <div>
+                                  <p className="text-xs text-zinc-400 font-medium">{t('Lidhur me sukses', 'Connected successfully')}</p>
+                                  <p className="text-sm font-bold text-zinc-100">{user.email || user.uid}</p>
+                                </div>
+                            </div>
+                            <button
+                               type="button"
+                               onClick={async () => {
+                                  await hookLogout();
+                                  showToast("U çkyçët me sukses nga Cloud!");
+                               }}
+                               className="px-3.5 py-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 font-bold text-xs rounded-lg border border-red-500/20 transition-all flex items-center justify-center gap-1.5"
+                            >
+                               Çkyçu (Sign Out)
+                            </button>
+                         </div>
+                      ) : (
+                         <div className="space-y-3 text-left">
+                            <p className="text-xs text-zinc-400">
+                               {t('Për të sinkronizuar shënimet, konfigurimet dhe sekretet tuaja në mënyrë të sigurt, kyçuni me Email/Fjalëkalim ose llogari Google.', 'To sync your notes, settings, and secrets securely, please log in with Email/Password or Google account.')}
+                            </p>
+                            <button
+                               type="button"
+                               onClick={() => setAuthModal(true)}
+                               className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5"
+                            >
+                               <LogIn className="w-4 h-4" /> {t('Kyçu në Cloud', 'Log in to Cloud')}
+                            </button>
+                         </div>
+                      )}
                    </div>
 
                    {/* Document Action Control Bar - EDITOR, SAVE, PREVIEW, FULLVIEW, IMPORTBACKUP, EXPORT, SELECT ALL ONE, DELETE */}
@@ -4437,50 +4529,18 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                          </div>
                       ) : (
                          <div className="space-y-4 w-full text-left">
-                             {/* Email Import Direct Section for New Phone Installation */}
-                             <div className="p-3.5 rounded-xl border bg-zinc-100/50 dark:bg-zinc-950/50 border-zinc-300 dark:border-zinc-800 space-y-3">
-                                <h5 className="text-xs font-bold uppercase tracking-wider text-sky-500 flex items-center gap-1.5 font-sans">
-                                   <RefreshCw className="w-3.5 h-3.5 animate-spin-slow text-sky-500" /> {t('Importim i Shpejtë me Email (Telefon i Ri)', 'Quick Email Import (New Phone)')}
+                             {/* Cloud Information Section instead of Email Input */}
+                             <div className="p-4 rounded-xl border bg-zinc-100/50 dark:bg-zinc-950/50 border-zinc-300 dark:border-zinc-800 space-y-2">
+                                <h5 className="text-xs font-bold uppercase tracking-wider text-emerald-500 flex items-center gap-1.5 font-sans">
+                                   <Lock className="w-3.5 h-3.5 text-emerald-500" /> {t('Sinkronizim i Sigurt Online', 'Secure Online Sync')}
                                 </h5>
-                                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                                   {t('Nëse sapo keni instaluar aplikacionin në një telefon të ri, shkruani email-in tuaj më poshtë për të importuar dhe ngarkuar plotësisht të gjitha shënimet tuaja nga Cloud.', 'If you just installed the app on a new phone, enter your email below to import and fully load all your notes from the Cloud.')}
+                                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                                   {t('Për të sinkronizuar, ruajtur ose rikthyer (Restore All) të gjitha dokumentet e bllokut tuaj në mënyrë të sigurt nga llogaria juaj, ju lutem kyçuni me Email & Fjalëkalim ose llogari Google.', 'To sync, save, or fully restore (Restore All) all your notebook documents securely from your account, please log in with Email & Password or Google account.')}
                                 </p>
-                                <div className="flex flex-col sm:flex-row gap-2">
-                                   <input 
-                                      type="email"
-                                      value={email}
-                                      onChange={(e) => {
-                                         const val = e.target.value;
-                                         setEmail(val);
-                                         localStorage.setItem('grid_notepad_saved_email', val);
-                                         localStorage.setItem('grid_notepad_user_account', val);
-                                      }}
-                                      placeholder="Adresa e-mail (p.sh. genti8319@gmail.com)"
-                                      className={`flex-1 px-3 py-1.5 text-xs rounded-lg border outline-none font-semibold ${
-                                         isDark ? "bg-zinc-900 border-zinc-700 text-white focus:border-sky-500" : "bg-white border-zinc-300 text-zinc-900 focus:border-sky-500"
-                                      }`}
-                                   />
-                                   <button
-                                      onClick={async () => {
-                                         const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
-                                         if (!mail) {
-                                            showToast("Ju lutem shkruani një email të vlefshëm!");
-                                            return;
-                                         }
-                                         localStorage.setItem('grid_notepad_saved_email', mail);
-                                         localStorage.setItem('grid_notepad_user_account', mail);
-                                         showToast("Duke ngarkuar dokumentet online për " + mail + "...");
-                                         await handleUnifiedCloudSync();
-                                      }}
-                                      className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1 shrink-0"
-                                   >
-                                      <Download className="w-3.5 h-3.5" /> {t('Importo nga Cloud', 'Import from Cloud')}
-                                   </button>
-                                </div>
                              </div>
 
-                             <button onClick={() => {setBackupModal(false); setAuthModal(true)}} className={`w-full flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors bg-accent-600 hover:bg-accent-500 text-white shadow-lg`}>
-                                <LogIn className="w-4 h-4" /> {t('Kyçuni për Cloud / Menaxho', 'Login for Cloud / Manage')}
+                             <button onClick={() => {setBackupModal(false); setAuthModal(true)}} className={`w-full flex justify-center items-center gap-2 px-4 py-2.5 font-bold rounded-xl transition-all bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg`}>
+                                <LogIn className="w-4 h-4" /> {t('Kyçuni me Email/Password ose Google', 'Login with Email/Password or Google')}
                              </button>
                           </div>
                       )}
