@@ -2,9 +2,9 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ "main", "master" ]
   workflow_dispatch:
     inputs:
       build_type:
@@ -30,7 +30,8 @@ jobs:
   build:
     name: Build Android App
     runs-on: ubuntu-latest
-    permissions: write-all
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Repository
@@ -47,8 +48,8 @@ jobs:
 
       - name: Build Web App
         env:
-          VITE_GEMINI_API_KEY: ${{ inputs.gemini_api_key || secrets.VITE_GEMINI_API_KEY || secrets.GEMINI_API_KEY || vars.VITE_GEMINI_API_KEY || '' }}
-          GEMINI_API_KEY: ${{ inputs.gemini_api_key || secrets.GEMINI_API_KEY || secrets.VITE_GEMINI_API_KEY || vars.GEMINI_API_KEY || '' }}
+          VITE_GEMINI_API_KEY: ${{ github.event.inputs.gemini_api_key || secrets.VITE_GEMINI_API_KEY || secrets.GEMINI_API_KEY || vars.VITE_GEMINI_API_KEY || '' }}
+          GEMINI_API_KEY: ${{ github.event.inputs.gemini_api_key || secrets.GEMINI_API_KEY || secrets.VITE_GEMINI_API_KEY || vars.GEMINI_API_KEY || '' }}
         run: npm run build
 
       - name: Add Android Platform
