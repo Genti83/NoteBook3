@@ -14,7 +14,8 @@ import {
   signInWithRedirect,
   setPersistence,
   browserLocalPersistence,
-  signInAnonymously
+  signInAnonymously,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
 
@@ -166,6 +167,17 @@ export function useFirebase() {
     await firebaseSignOut(auth);
   };
 
+  const resetPassword = async (email: string) => {
+    try {
+      addDebugLog('Starting Password Reset for: ' + email);
+      await sendPasswordResetEmail(auth, email);
+      addDebugLog('Password Reset Email Sent successfully');
+    } catch(err: any) {
+      addDebugLog('Password Reset Failed: ' + err.message + ' (code: ' + err.code + ')');
+      throw err;
+    }
+  };
+
   return {
     user,
     loading,
@@ -173,6 +185,7 @@ export function useFirebase() {
     loginWithEmail,
     registerWithEmail,
     loginAnonymously,
-    logout
+    logout,
+    resetPassword
   };
 }

@@ -368,13 +368,15 @@ export function Notepad() {
 
   const [authModal, setAuthModal] = useState(false);
   const [authError, setAuthError] = useState<{ code: string; message: string; provider: string } | null>(null);
+  const [resetSent, setResetSent] = useState(false);
 
   useEffect(() => {
     if (authModal) {
       setAuthError(null);
+      setResetSent(false);
     }
   }, [authModal]);
-  const { user, loading, loginWithGoogle: hookGoogleLogin, loginWithEmail: hookEmailLogin, registerWithEmail: hookEmailRegister, loginAnonymously: hookAnonymousLogin, logout: hookLogout } = useFirebase();
+  const { user, loading, loginWithGoogle: hookGoogleLogin, loginWithEmail: hookEmailLogin, registerWithEmail: hookEmailRegister, loginAnonymously: hookAnonymousLogin, logout: hookLogout, resetPassword: hookResetPassword } = useFirebase();
   const [email, setEmail] = useState(() => localStorage.getItem('grid_notepad_saved_email') || '');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
@@ -1816,6 +1818,21 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
           }
           
           showToast(msg);
+      }
+  };
+
+  const handleResetPassword = async () => {
+      if (!email) {
+          showToast(t("Ju lutem shkruani email-in tuaj më lart!", "Please type your email above!"));
+          return;
+      }
+      try {
+          showToast(t("Po dërgojmë email-in e rivendosjes...", "Sending reset email..."));
+          await hookResetPassword(email);
+          showToast(t("Email-i i rivendosjes u dërgua me sukses! Kontrolloni inbox-in tuaj.", "Reset email sent successfully! Check your inbox."));
+          setResetSent(true);
+      } catch (err: any) {
+          showToast(t("Gabim gjatë dërgimit: ", "Error during send: ") + err.message);
       }
   };
 
@@ -3961,8 +3978,49 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                         </div>
                                      )}
 
+                                     {(authError.code === 'auth/invalid-credential' || authError.code === 'auth/wrong-password') && (
+                                        <div className="space-y-1.5">
+                                           <p className="font-medium text-zinc-200">
+                                              🔑 {t('Fjalëkalim i pasaktë ose llogaria kërkon rivendosje!', 'Incorrect password or account needs reset!')}
+                                           </p>
+                                           <p className="text-[11px] text-zinc-400">
+                                              {t('Kjo ndodh kur shkruani një fjalëkalim të gabuar, ose kur kjo adresë email është e regjistruar por fjalëkalimi i vendosur nuk përputhet (p.sh. nëse fillimisht jeni kyçur me Google).', 'This happens when you write an incorrect password, or if this email address is registered but the password entered does not match (e.g. if you originally signed up with Google).')}
+                                           </p>
+                                           <button
+                                              type="button"
+                                              onClick={handleResetPassword}
+                                              className="mt-1 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 font-bold rounded-lg border border-emerald-500/30 transition-all text-[11px]"
+                                           >
+                                              📩 {t('Dërgo Email për Rivendosje Fjalëkalimi', 'Send Password Reset Email')}
+                                           </button>
+                                        </div>
+                                     )}
+
+                                     {authError.code === 'auth/too-many-requests' && (
+                                        <div className="space-y-1.5">
+                                           <p className="font-medium text-zinc-200">
+                                              ⚠️ {t('Keni provuar shumë herë!', 'Too many attempts!')}
+                                           </p>
+                                           <p className="text-[11px] text-zinc-400">
+                                              {t('Firebase ka bllokuar përkohësisht kërkesat nga kjo pajisje për arsye sigurie për shkak të shumë tentativave të pasukseshme. Ju lutemi prisni disa minuta ose klikoni butonin më poshtë për të rivendosur fjalëkalimin tuaj.', 'Firebase has temporarily blocked requests from this device for security reasons due to multiple unsuccessful attempts. Please wait a few minutes or click the button below to reset your password.')}
+                                           </p>
+                                           <button
+                                              type="button"
+                                              onClick={handleResetPassword}
+                                              className="mt-1 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 font-bold rounded-lg border border-emerald-500/30 transition-all text-[11px]"
+                                           >
+                                              📩 {t('Dërgo Email për Rivendosje Fjalëkalimi', 'Send Password Reset Email')}
+                                           </button>
+                                        </div>
+                                     )}
+
                                      {/* Default/Other Firebase Error guidance */}
-                                     {authError.code !== 'auth/operation-not-allowed' && authError.code !== 'auth/admin-restricted-operation' && authError.code !== 'auth/unauthorized-domain' && (
+                                     {authError.code !== 'auth/operation-not-allowed' && 
+                                      authError.code !== 'auth/admin-restricted-operation' && 
+                                      authError.code !== 'auth/unauthorized-domain' && 
+                                      authError.code !== 'auth/invalid-credential' && 
+                                      authError.code !== 'auth/wrong-password' && 
+                                      authError.code !== 'auth/too-many-requests' && (
                                         <div className="space-y-1.5">
                                            <p className="font-medium text-zinc-200">
                                               {t('Rekomandime për zgjidhje:', 'Troubleshooting recommendations:')}
@@ -4061,7 +4119,22 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                            : "bg-white border-zinc-300 text-zinc-900 focus:border-emerald-500"
                                      }`}
                                   />
+                                  <div className="flex justify-end mt-1.5">
+                                     <button
+                                        type="button"
+                                        onClick={handleResetPassword}
+                                        className="text-xs text-emerald-400 hover:text-emerald-300 transition-all font-semibold hover:underline"
+                                     >
+                                        {t('Keni harruar fjalëkalimin?', 'Forgot password?')}
+                                     </button>
+                                  </div>
                                </div>
+
+                               {resetSent && (
+                                  <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 text-left text-xs text-emerald-400 font-medium">
+                                     ✓ {t('Email-i i rivendosjes së fjalëkalimit u dërgua me sukses! Ju lutemi kontrolloni kutinë tuaj të postës (Inbox) dhe postën e padëshiruar (Spam).', 'Password reset email sent successfully! Please check your Inbox and Spam folder.')}
+                                  </div>
+                               )}
 
                                <button
                                   type="submit"
