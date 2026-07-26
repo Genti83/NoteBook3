@@ -46,7 +46,20 @@ export function useFirebase() {
          unsubscribe = onAuthStateChanged(auth, (currentUser) => {
            setUser(currentUser);
            setLoading(false);
-           addDebugLog('Auth state changed. User: ' + (currentUser ? currentUser.email : 'null'));
+           if (currentUser) {
+              if (currentUser.email) {
+                localStorage.setItem('grid_notepad_saved_email', currentUser.email);
+                if (currentUser.email.endsWith('@quicklogin.local')) {
+                   localStorage.setItem('grid_notepad_logged_in_provider', 'anonymous');
+                } else {
+                   const currProv = localStorage.getItem('grid_notepad_logged_in_provider');
+                   if (currProv !== 'email') {
+                      localStorage.setItem('grid_notepad_logged_in_provider', 'google');
+                   }
+                }
+              }
+            }
+            addDebugLog('Auth state changed. User: ' + (currentUser ? currentUser.email : 'null'));
          }, (err) => {
            addDebugLog('Auth state error: ' + err.message);
            setLoading(false);

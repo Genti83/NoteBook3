@@ -1534,7 +1534,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
     // Fallback to Firestore if custom cloud has no docs
     if (user) {
        try {
-          const q = query(collection(db, 'documents'), where('userId', '==', user.uid));
+          const q = query(collection(db, 'documents'), where('userId', '==', getActiveUid()!));
           const snapshot = await getDocs(q);
           const cloudData = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as GridDocument));
           if (cloudData.length > 0) {
@@ -1593,6 +1593,9 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
             localStorage.setItem('grid_cloud_sync_freq', '5000');
             setCloudSyncFrequency(5000);
             localStorage.setItem('grid_notepad_logged_in_provider', 'google');
+            if (result.user.email) {
+                localStorage.setItem('grid_notepad_saved_email', result.user.email);
+            }
             localStorage.removeItem('grid_notepad_custom_uid');
             showToast("Hyrje e suksesshme me Google! Sinkronizimi Cloud u aktivizua automatikisht!");
             setTimeout(() => forceCloudBackup(), 1500);
@@ -1687,7 +1690,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
          const fetchCloudData = async () => {
            try {
-               const q = query(collection(db, 'documents'), where('userId', '==', localStorage.getItem('grid_notepad_custom_uid') || user.uid));
+               const q = query(collection(db, 'documents'), where('userId', '==', getActiveUid()!));
                const snaps = await getDocs(q);
                const fetched: GridDocument[] = [];
                snaps.forEach(s => {
@@ -1730,7 +1733,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                        const cloudVersion = fetched.find(c => c.id === docObj.id);
                        if (!cloudVersion || new Date(docObj.updatedAt) > new Date(cloudVersion.updatedAt)) {
                            try {
-                               await setDoc(doc(db, 'documents', docObj.id), { ...docObj, userId: localStorage.getItem('grid_notepad_custom_uid') || user.uid });
+                               await setDoc(doc(db, 'documents', docObj.id), { ...docObj, userId: getActiveUid()! });
                            } catch (e) { console.error("Auto sync push error", e); }
                        }
                    });
@@ -1856,7 +1859,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
   const loginWithGoogle = async () => {
       try {
-         const googleUser = await hookGoogleLogin();
+         const googleUser = await hookGoogleLogin(); if (googleUser && googleUser.email) { localStorage.setItem("grid_notepad_saved_email", googleUser.email); }
          if (googleUser === null) {
             // This means a redirect was started! So we wait.
             showToast("Po ju ridrejtojmë tek Google për hyrje...");
@@ -3868,31 +3871,58 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
                 <div className="overflow-y-auto pr-1 space-y-4 scrollbar-hide">
                    {/* Status Banner & Unified Single Sync Button */}
-                   <div className={`p-3.5 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${isDark ? "bg-emerald-950/30 border-emerald-500/30" : "bg-emerald-50 border-emerald-200"}`}>
-                      <div className="flex items-start gap-3">
-                         <span className="relative flex h-3 w-3 mt-1 shrink-0">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                         </span>
-                         <div>
-                            <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                               Statusi: I Lidhur me Google Cloud Server
-                            </p>
-                            <p className="text-xs text-zinc-300 opacity-90 mt-0.5">
-                               Llogaria juaj është e lidhur përgjithmonë. Të gjitha fletët, shënimet, sekretet dhe kodi PIN ruhen automatikisht edhe offline!
-                            </p>
+                   {user ? (
+                      <div className={`p-3.5 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${isDark ? "bg-emerald-950/30 border-emerald-500/30" : "bg-emerald-50 border-emerald-200"}`}>
+                         <div className="flex items-start gap-3">
+                            <span className="relative flex h-3 w-3 mt-1 shrink-0">
+                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                               <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                            </span>
+                            <div>
+                               <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                                  Statusi: I Lidhur me Google Cloud
+                               </p>
+                               <p className="text-xs text-zinc-300 opacity-90 mt-0.5">
+                                  Lidhur me llogarinë: <span className="font-bold text-white">{user.email || user.uid}</span>. Të gjitha fletët dhe shënimet ruhen automatikisht në cloud!
+                               </p>
+                            </div>
                          </div>
-                      </div>
 
-                      {/* Unified Single Master Button */}
-                      <button
-                         type="button"
-                         onClick={handleUnifiedCloudSync}
-                         className="w-full sm:w-auto shrink-0 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2"
-                      >
-                         <RefreshCw className="w-4 h-4 animate-spin-slow" /> ⚡ Sinkronizo & Rifresko Tani (Cloud Sync)
-                      </button>
-                   </div>
+                         {/* Unified Single Master Button */}
+                         <button
+                            type="button"
+                            onClick={handleUnifiedCloudSync}
+                            className="w-full sm:w-auto shrink-0 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2"
+                         >
+                            <RefreshCw className="w-4 h-4 animate-spin-slow" /> ⚡ Sinkronizo & Rifresko Tani (Cloud Sync)
+                         </button>
+                      </div>
+                   ) : (
+                      <div className={`p-3.5 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${isDark ? "bg-amber-950/30 border-amber-500/30" : "bg-amber-50 border-amber-200"}`}>
+                         <div className="flex items-start gap-3">
+                            <span className="relative flex h-3 w-3 mt-1 shrink-0">
+                               <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 animate-pulse"></span>
+                            </span>
+                            <div>
+                               <p className="text-xs font-bold text-amber-500 uppercase tracking-wider">
+                                  Statusi: Offline / Pa Lidhur
+                               </p>
+                               <p className="text-xs text-zinc-400 mt-0.5">
+                                  Krijoni një llogari ose kyçuni më poshtë për të aktivizuar sinkronizimin automatik në re dhe për të ruajtur të dhënat tuaja sigurt online!
+                               </p>
+                            </div>
+                         </div>
+
+                         {/* Unified Single Master Button */}
+                         <button
+                            type="button"
+                            onClick={handleUnifiedCloudSync}
+                            className="w-full sm:w-auto shrink-0 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-lg shadow-amber-600/25 flex items-center justify-center gap-2"
+                         >
+                            <LogIn className="w-4 h-4" /> 🔑 Kyçu për të Sinkronizuar
+                         </button>
+                      </div>
+                   )}
 
                    {/* Google Account Connection Input */}
                    <div className={`p-4 rounded-xl border space-y-3 ${isDark ? "bg-zinc-950/80 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
@@ -5222,9 +5252,9 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                       <LogIn className="w-4 h-4" /> <span className="hidden sm:inline">{t('Hyrje', 'Login')}</span>
                    </button>
                ) : (
-                   <button onClick={() => {
+                   <button onClick={async () => {
                       localStorage.removeItem('grid_notepad_saved_pwd');
-                      signOut(auth);
+                      await hookLogout(); showToast("U çkyçët me sukses nga Cloud!");
                    }} className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border ${isDark ? "bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-300" : "bg-white border-zinc-300 hover:bg-zinc-100 text-zinc-700"}`}>
                       <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">{t('Dil', 'Logout')}</span>
                    </button>
@@ -6246,7 +6276,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                            
                            // Try saving to cloud
                            const theDoc = updatedDocs.find((x) => x.id === pd.documentId);
-                           if (user && theDoc) setDoc(doc(db, 'documents', theDoc.id), theDoc).catch(()=>console.error('ai header error sync'));
+                           if (user && theDoc) setDoc(doc(db, 'documents', theDoc.id), { ...theDoc, userId: getActiveUid()! }).catch(()=>console.error('ai header error sync'));
                         });
                   }} className="px-4 py-2 bg-accent-600 hover:bg-accent-500 text-white font-medium rounded-lg transition-colors">
                      {t('Apliko Ndryshimet', 'Apply Changes')}
