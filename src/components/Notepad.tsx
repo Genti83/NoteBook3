@@ -397,6 +397,9 @@ export function Notepad() {
   const [isOnlineEditing, setIsOnlineEditing] = useState(false);
   const [isOnlineAiThinking, setIsOnlineAiThinking] = useState(false);
   const [onlineSearch, setOnlineSearch] = useState('');
+  const [onlineDashboardTab, setOnlineDashboardTab] = useState<'lists' | 'notes' | 'secrets'>('lists');
+  const [onlineBlueText, setOnlineBlueText] = useState('');
+  const [onlineSecretList, setOnlineSecretList] = useState<{id: string, text: string, done: boolean}[]>([]);
   const [secureLogoutModal, setSecureLogoutModal] = useState<{
     isOpen: boolean;
     target: 'cloud' | 'gist' | null;
@@ -410,28 +413,58 @@ export function Notepad() {
   } | null>(null);
   const isGistSyncingRef = useRef(false);
 
-  const saveToGist = async (docsToSave: GridDocument[] = documents, silent = false) => {
+  const saveToGist = async (docsToSave: GridDocument[] = documents, silent = false, blueTextToSave?: string, secretListToSave?: any[]) => {
       if (!gistToken) {
          if (!silent) showToast("Ju lutem vendosni një GitHub Token");
          return;
       }
+      const finalBlueText = blueTextToSave !== undefined ? blueTextToSave : blueText;
+      const finalSecretList = secretListToSave !== undefined ? secretListToSave : secretList;
+
       if (!silent) showToast("Duke ruajtur në GitHub Gist...");
       try {
-          const content = JSON.stringify(docsToSave);
+          const contentObj = {
+             documents: docsToSave,
+             blueText: finalBlueText,
+             secretList: finalSecretList
+          };
+          const content = JSON.stringify(contentObj);
           
           // Generate a beautiful human-readable markdown notebook representation
           let mdContent = `# 📔 MANUAL NOTEBOOK - GIST CLOUD BACKUP\n\n`;
           mdContent += `*Ky skedar përmban të gjitha shënimet tuaja të sinkronizuara manualisht ose automatikisht në Gist Cloud.*\n`;
           mdContent += `*Përditësuar më: ${new Date().toLocaleString('sq-AL')}*\n\n---\n\n`;
 
+          // Add BlueText/Notes to markdown
+          mdContent += `## 📝 SHËNIMET ME TEKST (NOTES)\n\n`;
+          if (finalBlueText) {
+             mdContent += `${finalBlueText}\n\n`;
+          } else {
+             mdContent += `*Nuk ka shënime me tekst.*\n\n`;
+          }
+          mdContent += `\n---\n\n`;
+
+          // Add SecretList to markdown
+          mdContent += `## 🔒 LISTA E SEKRETEVE (SECRETS)\n\n`;
+          if (finalSecretList && finalSecretList.length > 0) {
+             finalSecretList.forEach((secretItem, idx) => {
+                const check = secretItem.done ? '[x]' : '[ ]';
+                mdContent += `- ${check} ${secretItem.text || 'Element i paemërtuar'}\n`;
+             });
+          } else {
+             mdContent += `*Nuk ka sekrete në listë.*\n\n`;
+          }
+          mdContent += `\n---\n\n`;
+
+          mdContent += `## 📄 LISTAT E TABELAVE (TABLE DOCUMENTS)\n\n`;
           docsToSave.forEach((docItem, index) => {
-             mdContent += `## ${index + 1}. 📄 ${docItem.title || 'Dokument i Paemërtuar'}\n`;
+             mdContent += `### ${index + 1}. 📄 ${docItem.title || 'Dokument i Paemërtuar'}\n`;
              mdContent += `- **Krijuar më:** ${docItem.createdAt ? new Date(docItem.createdAt).toLocaleString('sq-AL') : 'N/A'}\n`;
              mdContent += `- **Përditësuar më:** ${docItem.updatedAt ? new Date(docItem.updatedAt).toLocaleString('sq-AL') : 'N/A'}\n`;
              if (docItem.tags && docItem.tags.length > 0) {
                 mdContent += `- **Etiketat:** ${docItem.tags.map(t => `\`${t}\``).join(', ')}\n`;
              }
-             mdContent += `\n### 📊 Përmbajtja e Tabelës / Shënimeve\n\n`;
+             mdContent += `\n#### 📊 Përmbajtja e Tabelës\n\n`;
 
              // Headers
              const headersLine = '| ' + docItem.headers.join(' | ') + ' |';
@@ -520,8 +553,25 @@ export function Notepad() {
           
           try {
              const parsed = JSON.parse(content);
-             if (Array.isArray(parsed) && parsed.length > 0) {
-                setSelectedOnlineDoc(parsed[0]);
+             let docsList: GridDocument[] = [];
+             let gistBlueText = '';
+             let gistSecretList: any[] = [];
+             
+             if (parsed && typeof parsed === 'object') {
+                if (Array.isArray(parsed)) {
+                   docsList = parsed;
+                } else {
+                   docsList = parsed.documents || [];
+                   gistBlueText = parsed.blueText || '';
+                   gistSecretList = parsed.secretList || [];
+                }
+             }
+             
+             setOnlineBlueText(gistBlueText);
+             setOnlineSecretList(gistSecretList);
+             
+             if (docsList.length > 0) {
+                setSelectedOnlineDoc(docsList[0]);
              }
           } catch(e){}
       } catch (err: any) {
@@ -560,10 +610,30 @@ export function Notepad() {
           const content = file.truncated ? await (await fetch(file.raw_url)).text() : file.content;
           const parsed = JSON.parse(content);
           
-          setDocuments(parsed);
-          localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(parsed));
+          let docs = parsed;
+          let gistBlueText = '';
+          let gistSecretList: any[] = [];
+          
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+             docs = parsed.documents || [];
+             gistBlueText = parsed.blueText || '';
+             gistSecretList = parsed.secretList || [];
+          }
+          
+          setDocuments(docs);
+          localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(docs));
+          
+          if (gistBlueText) {
+             setBlueText(gistBlueText);
+             localStorage.setItem('grid_notepad_blue', gistBlueText);
+          }
+          if (gistSecretList && gistSecretList.length > 0) {
+             setSecretList(gistSecretList);
+             localStorage.setItem('grid_notepad_secret_list', JSON.stringify(gistSecretList));
+          }
+
           if (activeDocId) {
-             const curr = parsed.find((d: any) => d.id === activeDocId);
+             const curr = docs.find((d: any) => d.id === activeDocId);
              if (curr) {
                  setRows(curr.rows);
                  setHeaders(curr.headers);
@@ -1680,8 +1750,10 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
         const res = await fetch(finalEp, { headers });
         if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
           const json = await res.json();
-          if (json.documents && json.documents.length > 0) {
+          if (json.documents) {
             loadedDocs = json.documents;
+            setOnlineBlueText(json.blueText || '');
+            setOnlineSecretList(json.secretList || []);
             break;
           }
         }
@@ -1700,6 +1772,18 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
           const q = query(collection(db, 'documents'), where('userId', '==', getActiveUid()!));
           const snapshot = await getDocs(q);
           const cloudData = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as GridDocument));
+          
+          // Load settings (blueText and secretList) from Firestore
+          const settingsSnap = await getDoc(doc(db, 'settings', getActiveUid()!));
+          if (settingsSnap.exists()) {
+             const sData = settingsSnap.data();
+             setOnlineBlueText(sData.blueText || '');
+             setOnlineSecretList(sData.secretList || []);
+          } else {
+             setOnlineBlueText('');
+             setOnlineSecretList([]);
+          }
+
           if (cloudData.length > 0) {
              setCloudDocs(cloudData);
              setIsFetchingCloud(false);
@@ -3906,8 +3990,50 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
               </div>
            </div>
 
-           {/* MAIN CONTAINER (SPLIT SCREEN) */}
+           {/* SEGMENTED TAB SELECTOR */}
+           <div className={`flex border-b px-4 py-2.5 gap-2 overflow-x-auto shrink-0 ${isDark ? "bg-zinc-950 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+              <button 
+                 id="tab-btn-lists"
+                 onClick={() => { setOnlineDashboardTab('lists'); setIsOnlineEditing(false); }}
+                 className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap active:scale-95 ${
+                    onlineDashboardTab === 'lists' 
+                       ? "bg-accent-500 text-white shadow-md shadow-accent-500/10" 
+                       : (isDark ? "bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200" : "bg-white border border-zinc-200 hover:bg-zinc-100 text-zinc-600 hover:text-zinc-800")
+                 }`}
+              >
+                 <FileSpreadsheet className="w-4 h-4 text-amber-500" />
+                 Listat e Notebook ({docsList.length})
+              </button>
+              <button 
+                 id="tab-btn-notes"
+                 onClick={() => { setOnlineDashboardTab('notes'); setIsOnlineEditing(false); }}
+                 className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap active:scale-95 ${
+                    onlineDashboardTab === 'notes' 
+                       ? "bg-accent-500 text-white shadow-md shadow-accent-500/10" 
+                       : (isDark ? "bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200" : "bg-white border border-zinc-200 hover:bg-zinc-100 text-zinc-600 hover:text-zinc-800")
+                 }`}
+              >
+                 <FileText className="w-4 h-4 text-blue-500" />
+                 Shënimet me Tekst
+              </button>
+              <button 
+                 id="tab-btn-secrets"
+                 onClick={() => { setOnlineDashboardTab('secrets'); setIsOnlineEditing(false); }}
+                 className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap active:scale-95 ${
+                    onlineDashboardTab === 'secrets' 
+                       ? "bg-accent-500 text-white shadow-md shadow-accent-500/10" 
+                       : (isDark ? "bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200" : "bg-white border border-zinc-200 hover:bg-zinc-100 text-zinc-600 hover:text-zinc-800")
+                 }`}
+              >
+                 <Lock className="w-4 h-4 text-emerald-500" />
+                 Lista e Sekreteve ({onlineSecretList.length})
+              </button>
+           </div>
+
+           {/* MAIN CONTAINER (SPLIT SCREEN OR ACTIVE TAB VIEW) */}
            <div className="flex-1 flex flex-col md:flex-row overflow-hidden w-full">
+              {onlineDashboardTab === 'lists' ? (
+                 <React.Fragment>
               {/* LEFT SIDEBAR (ONLINE DOCUMENTS LIST) */}
               <div className={`w-full md:w-80 border-b md:border-b-0 md:border-r flex flex-col shrink-0 overflow-hidden ${isDark ? "border-zinc-800 bg-zinc-950/20" : "border-zinc-200 bg-zinc-50/40"}`}>
                  {/* Search Box */}
@@ -4181,6 +4307,288 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                     </div>
                  )}
               </div>
+           </React.Fragment>
+              ) : onlineDashboardTab === 'notes' ? (
+                 <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-zinc-950">
+                    {/* HEADER & INFO */}
+                    <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-col gap-1 shrink-0">
+                       <h2 className="text-lg font-bold flex items-center gap-2">
+                          <FileText className="w-5 h-5 text-accent-500" />
+                          Shënimet me Tekst (Fletore / Notebook)
+                       </h2>
+                       <p className="text-xs text-zinc-500">
+                          Këtu mund të shikoni ose redaktoni shënimet tuaja të përgjithshme që sinkronizohen në Cloud dhe Gist.
+                       </p>
+                    </div>
+
+                    {/* TOOLBAR */}
+                    <div className={`px-4 py-2.5 border-b flex flex-wrap gap-2 items-center justify-between shrink-0 ${isDark ? "bg-zinc-900/40 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+                       <div className="flex flex-wrap gap-1.5">
+                          {/* EDIT TEXT */}
+                          <button
+                             onClick={() => setIsOnlineEditing(!isOnlineEditing)}
+                             className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 border active:scale-95 ${
+                                isOnlineEditing
+                                   ? "bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border-amber-500/20 animate-pulse"
+                                   : (isDark ? "bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-200" : "bg-white border-zinc-300 hover:bg-zinc-100 text-zinc-700")
+                             }`}
+                          >
+                             <Edit className="w-3.5 h-3.5" /> {isOnlineEditing ? "Shiko (View Mode)" : "Ndrysho (Edittext)"}
+                          </button>
+
+                          {/* SAVE BUTTON */}
+                          <button
+                             onClick={async () => {
+                                if (onlineView === 'cloud') {
+                                   const success = await syncWithGoogleCloud(cloudDocs, false, onlineBlueText, onlineSecretList);
+                                   if (success) {
+                                      setIsOnlineEditing(false);
+                                      showToast("⚡ Shënimet u ruajtën me sukses në Google Cloud!");
+                                    }
+                                } else if (onlineView === 'gist') {
+                                   try {
+                                      let parsedGistDocs: GridDocument[] = [];
+                                      try {
+                                         const parsed = JSON.parse(gistViewerContent || '[]');
+                                         if (Array.isArray(parsed)) {
+                                            parsedGistDocs = parsed;
+                                         } else if (parsed && typeof parsed === 'object') {
+                                            parsedGistDocs = parsed.documents || [];
+                                         }
+                                      } catch(e){}
+
+                                      await saveToGist(parsedGistDocs, false, onlineBlueText, onlineSecretList);
+                                      setIsOnlineEditing(false);
+                                      showToast("⚡ Shënimet u ruajtën me sukses në GitHub Gist!");
+                                   } catch (err: any) {
+                                      showToast("Dështoi ruajtja në Gist: " + err.message);
+                                   }
+                                }
+                             }}
+                             className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 border active:scale-95 ${
+                                isDark ? "bg-green-600 hover:bg-green-500 text-white border-transparent" : "bg-green-500 hover:bg-green-600 text-white border-transparent"
+                             }`}
+                          >
+                             <Save className="w-3.5 h-3.5" /> {t('Ruaj', 'Save')}
+                          </button>
+
+                          {/* RESTORE / IMPORT TO LOCAL NOTEBOOK */}
+                          <button
+                             onClick={() => {
+                                if (!onlineBlueText.trim()) {
+                                   showToast("Nuk ka shënime online për t'u rikthyer në notebook.");
+                                   return;
+                                }
+                                setBlueText(onlineBlueText);
+                                localStorage.setItem('grid_notepad_blue', onlineBlueText);
+                                showToast("⚡ Shënimet u rikthyen me sukses në Notebook-un tuaj lokal!");
+                             }}
+                             className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 border active:scale-95 ${
+                                isDark ? "bg-orange-600 hover:bg-orange-500 text-white border-transparent" : "bg-orange-500 hover:bg-orange-600 text-white border-transparent"
+                             }`}
+                             title="Rikthe këto shënime në notebook-un lokal"
+                          >
+                             <Download className="w-3.5 h-3.5" /> Rikthe në Notebook-un Lokal
+                          </button>
+                       </div>
+                    </div>
+
+                    {/* NOTES WRITING ENGINE PREVIEW */}
+                    <div className="flex-1 overflow-auto p-4 flex flex-col">
+                       {isOnlineEditing ? (
+                          <textarea
+                             value={onlineBlueText}
+                             onChange={(e) => setOnlineBlueText(e.target.value)}
+                             placeholder="Shkruani shënimet tuaja këtu..."
+                             className={`w-full flex-1 p-4 rounded-xl border focus:outline-none focus:border-accent-500 font-sans text-sm resize-none ${
+                                isDark ? "bg-zinc-900 border-zinc-800 text-white placeholder-zinc-600" : "bg-zinc-50 border-zinc-200 text-zinc-900 placeholder-zinc-400"
+                             }`}
+                          />
+                       ) : (
+                          <div className={`p-4 rounded-xl border flex-1 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed ${
+                             isDark ? "bg-zinc-900/40 border-zinc-800/60 text-zinc-200" : "bg-zinc-50/40 border-zinc-200/60 text-zinc-800"
+                          }`}>
+                             {onlineBlueText.trim() ? onlineBlueText : <span className="italic text-zinc-400">Nuk ka asnjë shënim të shkruar. Kliko 'Ndrysho' për të shkruar shënime të reja.</span>}
+                          </div>
+                       )}
+                    </div>
+                 </div>
+              ) : (
+                 <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-zinc-950">
+                    {/* HEADER & INFO */}
+                    <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-col gap-1 shrink-0">
+                       <h2 className="text-lg font-bold flex items-center gap-2">
+                          <Lock className="w-5 h-5 text-accent-500" />
+                          Lista e Sekreteve (Secrets Checklist)
+                       </h2>
+                       <p className="text-xs text-zinc-500">
+                          Menaxhoni dhe shikoni detyrat apo listat sekrete të sinkronizuara në mënyrë të sigurt.
+                       </p>
+                    </div>
+
+                    {/* TOOLBAR */}
+                    <div className={`px-4 py-2.5 border-b flex flex-wrap gap-2 items-center justify-between shrink-0 ${isDark ? "bg-zinc-900/40 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+                       <div className="flex flex-wrap gap-1.5">
+                          {/* EDIT MODE */}
+                          <button
+                             onClick={() => setIsOnlineEditing(!isOnlineEditing)}
+                             className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 border active:scale-95 ${
+                                isOnlineEditing
+                                   ? "bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border-amber-500/20 animate-pulse"
+                                   : (isDark ? "bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-200" : "bg-white border-zinc-300 hover:bg-zinc-100 text-zinc-700")
+                             }`}
+                          >
+                             <Edit className="w-3.5 h-3.5" /> {isOnlineEditing ? "Shiko (View Mode)" : "Ndrysho (Edittext)"}
+                          </button>
+
+                          {/* SAVE BUTTON */}
+                          <button
+                             onClick={async () => {
+                                if (onlineView === 'cloud') {
+                                   const success = await syncWithGoogleCloud(cloudDocs, false, onlineBlueText, onlineSecretList);
+                                   if (success) {
+                                      setIsOnlineEditing(false);
+                                      showToast("⚡ Lista e sekreteve u ruajt me sukses në Google Cloud!");
+                                   }
+                                } else if (onlineView === 'gist') {
+                                   try {
+                                      let parsedGistDocs: GridDocument[] = [];
+                                      try {
+                                         const parsed = JSON.parse(gistViewerContent || '[]');
+                                         if (Array.isArray(parsed)) {
+                                            parsedGistDocs = parsed;
+                                         } else if (parsed && typeof parsed === 'object') {
+                                            parsedGistDocs = parsed.documents || [];
+                                         }
+                                      } catch(e){}
+
+                                      await saveToGist(parsedGistDocs, false, onlineBlueText, onlineSecretList);
+                                      setIsOnlineEditing(false);
+                                      showToast("⚡ Lista e sekreteve u ruajt me sukses në GitHub Gist!");
+                                   } catch (err: any) {
+                                      showToast("Dështoi ruajtja në Gist: " + err.message);
+                                   }
+                                }
+                             }}
+                             className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 border active:scale-95 ${
+                                isDark ? "bg-green-600 hover:bg-green-500 text-white border-transparent" : "bg-green-500 hover:bg-green-600 text-white border-transparent"
+                             }`}
+                          >
+                             <Save className="w-3.5 h-3.5" /> {t('Ruaj', 'Save')}
+                          </button>
+
+                          {/* RESTORE / IMPORT TO LOCAL */}
+                          <button
+                             onClick={() => {
+                                if (onlineSecretList.length === 0) {
+                                   showToast("Nuk ka sekrete online për t'u rikthyer.");
+                                   return;
+                                }
+                                setSecretList(onlineSecretList);
+                                localStorage.setItem('grid_notepad_secret_list', JSON.stringify(onlineSecretList));
+                                showToast("⚡ Lista e sekreteve u rikthye me sukses në aplikacionin tuaj lokal!");
+                             }}
+                             className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 border active:scale-95 ${
+                                isDark ? "bg-orange-600 hover:bg-orange-500 text-white border-transparent" : "bg-orange-500 hover:bg-orange-600 text-white border-transparent"
+                             }`}
+                             title="Rikthe këtë listë sekretesh lokalisht"
+                          >
+                             <Download className="w-3.5 h-3.5" /> Rikthe në Sekretet Lokale
+                          </button>
+                       </div>
+
+                       {/* ADD SECRET BUTTON IN EDIT MODE */}
+                       {isOnlineEditing && (
+                          <button
+                             onClick={() => {
+                                const newItem = { id: Date.now().toString(), text: '', done: false };
+                                setOnlineSecretList([...onlineSecretList, newItem]);
+                             }}
+                             className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 border ${
+                                isDark ? "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white" : "bg-white hover:bg-zinc-50 border-zinc-300 text-zinc-800"
+                             }`}
+                          >
+                             <Plus className="w-4 h-4" /> Shto Element Sekret
+                          </button>
+                       )}
+                    </div>
+
+                    {/* CHECKLIST VIEW & EDITOR */}
+                    <div className="flex-1 overflow-auto p-4">
+                       {onlineSecretList.length === 0 ? (
+                          <div className="text-center py-10 text-xs text-zinc-500 italic">
+                             Nuk ka asnjë element në listën sekrete.
+                          </div>
+                       ) : (
+                          <div className="space-y-2.5 max-w-2xl mx-auto">
+                             {onlineSecretList.map((item, idx) => (
+                                <div 
+                                   key={item.id || idx} 
+                                   className={`flex items-center gap-3 p-3 rounded-xl border transition-colors ${
+                                      item.done 
+                                         ? (isDark ? "bg-zinc-900/40 border-zinc-800/55 opacity-70" : "bg-zinc-50 border-zinc-100 opacity-70")
+                                         : (isDark ? "bg-zinc-900/80 border-zinc-800" : "bg-white border-zinc-200")
+                                   }`}
+                                >
+                                   {/* CHECKBOX */}
+                                   <button
+                                      disabled={isOnlineEditing}
+                                      onClick={() => {
+                                         setOnlineSecretList(prev => prev.map((itm, i) => i === idx ? { ...itm, done: !itm.done } : itm));
+                                      }}
+                                      className={`p-1 rounded transition-colors ${isOnlineEditing ? "cursor-not-allowed opacity-50" : "hover:bg-zinc-500/10"}`}
+                                   >
+                                      {item.done ? (
+                                         <CheckCheck className="w-5 h-5 text-green-500" />
+                                      ) : (
+                                         <Square className="w-5 h-5 text-zinc-400" />
+                                      )}
+                                   </button>
+
+                                   {/* TEXT INPUT / VIEW */}
+                                   <div className="flex-1">
+                                      {isOnlineEditing ? (
+                                         <input
+                                            type="text"
+                                            value={item.text}
+                                            onChange={(e) => {
+                                               const val = e.target.value;
+                                               setOnlineSecretList(prev => prev.map((itm, i) => i === idx ? { ...itm, text: val } : itm));
+                                            }}
+                                            className={`w-full bg-transparent text-sm py-0.5 px-1 focus:outline-none border-b border-transparent focus:border-accent-500/30 font-semibold ${
+                                               isDark ? "text-white" : "text-zinc-900"
+                                            }`}
+                                            placeholder="Shkruani elementin sekret..."
+                                         />
+                                      ) : (
+                                         <span className={`text-sm font-semibold transition-all ${
+                                            item.done 
+                                               ? "line-through text-zinc-400 dark:text-zinc-500 font-normal" 
+                                               : (isDark ? "text-zinc-100" : "text-zinc-800")
+                                         }`}>
+                                            {item.text || <span className="italic text-zinc-400">Element pa tekst</span>}
+                                         </span>
+                                      )}
+                                   </div>
+
+                                   {/* DELETE BUTTON (IN EDIT MODE) */}
+                                   {isOnlineEditing && (
+                                      <button
+                                         onClick={() => {
+                                            setOnlineSecretList(prev => prev.filter((_, i) => i !== idx));
+                                         }}
+                                         className="p-1 rounded hover:bg-red-500/10 text-zinc-400 hover:text-red-500 transition-colors"
+                                      >
+                                         <Trash2 className="w-4 h-4" />
+                                      </button>
+                                   )}
+                                </div>
+                             ))}
+                          </div>
+                       )}
+                    </div>
+                 </div>
+              )}
            </div>
         </div>
      );
