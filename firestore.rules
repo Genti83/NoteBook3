@@ -32,7 +32,11 @@ service cloud.firestore {
     function isValidSettings(data) {
       return data.userId is string && data.userId.size() <= 128 &&
              (data.blueText == null || (data.blueText is string && data.blueText.size() <= 100000)) &&
-             (data.secretList == null || (data.secretList is list && data.secretList.size() <= 1000));
+             (data.secretList == null || (data.secretList is list && data.secretList.size() <= 1000)) &&
+             (data.pin == null || (data.pin is string && data.pin.size() <= 100)) &&
+             (data.gistToken == null || (data.gistToken is string && data.gistToken.size() <= 200)) &&
+             (data.gistId == null || (data.gistId is string && data.gistId.size() <= 200)) &&
+             (data.geminiKey == null || (data.geminiKey is string && data.geminiKey.size() <= 200));
     }
 
     // Documents match block

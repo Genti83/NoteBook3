@@ -24,6 +24,9 @@
         "blueText": { "type": "string", "description": "The encrypted or plain drafting text of the secrets modal" },
         "secretList": { "type": "array", "description": "Secrets checklist items" },
         "pin": { "type": "string", "description": "Hashed or plain numeric password/PIN" },
+        "gistToken": { "type": "string", "description": "GitHub Gist API Token" },
+        "gistId": { "type": "string", "description": "GitHub Gist ID" },
+        "geminiKey": { "type": "string", "description": "Google Gemini API Key" },
         "userId": { "type": "string", "description": "The user identifier" }
       },
       "required": ["userId"]

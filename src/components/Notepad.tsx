@@ -1777,18 +1777,15 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       try {
           if (isSignUp) {
               await hookEmailRegister(email, password);
-              showToast("Llogaria u krijua me sukses! Sinkronizimi Cloud u aktivizua.");
+              showToast("Lorigjistrim i suksesshëm! Sinkronizimi Cloud u aktivizua.");
           } else {
               await hookEmailLogin(email, password);
               showToast("Hyrje e suksesshme! Sinkronizimi Cloud u aktivizua.");
-              // Auto-restore if local docs are empty (e.g. new phone)
-              if (documents.length === 0 || (documents.length === 1 && documents[0].rows.length === 0)) {
-                  setTimeout(() => handleFullCloudRestore(), 1000);
-              }
           }
           
           localStorage.setItem('grid_notepad_saved_email', email);
           localStorage.setItem('grid_notepad_saved_pwd', password);
+          localStorage.setItem('grid_notepad_logged_in_provider', 'email');
           localStorage.removeItem('grid_notepad_custom_uid'); 
           
           localStorage.setItem('grid_cloud_sync_freq', '5000');
@@ -1797,7 +1794,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
           setAuthModal(false);
           setPassword('');
           
-          setTimeout(() => forceCloudBackup(), 1500);
+          setTimeout(() => handleUnifiedCloudSync(), 1500);
       } catch (err: any) {
           console.error("Email auth err:", err);
           setAuthError({ code: err.code || 'unknown', message: err.message, provider: 'email' });
@@ -1809,16 +1806,13 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                  showToast("Hyrje e suksesshme me llogarinë tuaj!");
                  localStorage.setItem('grid_notepad_saved_email', email);
                  localStorage.setItem('grid_notepad_saved_pwd', password);
+                 localStorage.setItem('grid_notepad_logged_in_provider', 'email');
                  localStorage.removeItem('grid_notepad_custom_uid'); 
                  localStorage.setItem('grid_cloud_sync_freq', '5000');
                  setCloudSyncFrequency(5000);
                  setAuthModal(false);
                  setPassword('');
-                 if (documents.length === 0 || (documents.length === 1 && documents[0].rows.length === 0)) {
-                    setTimeout(() => handleFullCloudRestore(), 1000);
-                 } else {
-                    setTimeout(() => forceCloudBackup(), 1500);
-                 }
+                 setTimeout(() => handleUnifiedCloudSync(), 1500);
                  return;
              } catch (loginErr: any) {
                  setIsSignUp(false);
@@ -4951,7 +4945,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                        <div className="flex items-center justify-between flex-wrap gap-2">
                           <h4 className={`font-extrabold text-sm sm:text-base flex items-center gap-2 text-blue-600 dark:text-blue-400`}>
                              <Github className="w-5 h-5 text-zinc-900 dark:text-white shrink-0" />
-                             Gist Cloud Connector (Google Cloud API Style)
+                             Gist Cloud Connector (Google Cloud/Gist Style)
                           </h4>
                           <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold border ${
                              gistToken ? "bg-blue-500/10 text-blue-500 border-blue-500/20" : "bg-zinc-500/10 text-zinc-500 border-zinc-500/20"
@@ -5009,21 +5003,18 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                           </div>
                        </div>
 
-                       <div className="grid grid-cols-2 gap-3 pt-1">
-                          <button onClick={saveToGist} className="flex justify-center items-center gap-2 px-4 py-2.5 font-bold text-xs sm:text-sm rounded-xl transition-all bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/15">
-                             <Upload className="w-4 h-4" /> Ruaj (Sync)
-                          </button>
-                          <button onClick={loadFromGist} className={`flex justify-center items-center gap-2 px-4 py-2.5 font-bold text-xs sm:text-sm rounded-xl transition-all border ${isDark ? "bg-zinc-850 hover:bg-zinc-800 border-zinc-700 text-zinc-300" : "bg-white hover:bg-zinc-100 border-zinc-300 text-zinc-700 shadow-sm"}`}>
-                             <Download className="w-4 h-4" /> Ngarko / Rikthe
-                          </button>
-                       </div>
-                       
-                       <div>
-                          <button onClick={viewGistContent} className={`w-full flex justify-center items-center gap-2 px-4 py-2.5 font-bold text-xs rounded-xl transition-all border shadow-sm ${isDark ? "bg-zinc-800 hover:bg-zinc-750 text-white border-transparent" : "bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border-transparent"}`}>
-                             <Eye className="w-4 h-4" /> Shiko Dokumentet Online (Gist Manual)
-                          </button>
-                       </div>
-                    </div>
+                       <div className="flex flex-col sm:flex-row gap-3">
+                           <button onClick={saveToGist} className="flex-1 flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20">
+                              <Upload className="w-4 h-4" /> {t('Shto në Gist', 'Push to Gist')}
+                           </button>
+                           <button onClick={loadFromGist} className={`flex-1 flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors border ${isDark ? "bg-orange-600 hover:bg-orange-500 text-white shadow-md border-transparent" : "bg-orange-500 hover:bg-orange-600 text-white shadow-md font-bold border-transparent"}`}>
+                              <Download className="w-4 h-4" /> {t('Rikthe nga Gist', 'Restore All')}
+                           </button>
+                           <button onClick={viewGistContent} className={`flex-1 flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors border ${isDark ? "bg-green-600 hover:bg-green-500 text-white shadow-md border-transparent" : "bg-green-500 hover:bg-green-600 text-white shadow-md font-bold border-transparent"}`}>
+                              <FolderOpen className="w-4 h-4" /> {t('Listo Gist', 'List Gist')}
+                           </button>
+                        </div>
+                     </div>
                 </div>
              </div>
           </div>
@@ -5032,30 +5023,77 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       {/* GIST VIEWER MODAL */}
       {gistViewerModal && (
           <div className="fixed inset-0 z-[100] flex items-start pt-12 pb-[40vh] md:items-center justify-center bg-black/60 p-4 animate-in fade-in overflow-y-auto">
-             <div className={`max-w-4xl w-full max-h-[85vh] flex flex-col rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
+             <div className={`max-w-2xl w-full max-h-[85vh] flex flex-col rounded-2xl shadow-2xl border ${isDark ? "bg-zinc-900 border-zinc-700" : "bg-white border-zinc-300"}`}>
                 <div className={`flex justify-between items-center p-5 border-b ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
                    <h3 className={`text-xl font-bold flex items-center gap-2 ${textColor}`}>
-                      <Github className="w-6 h-6 text-zinc-900 dark:text-white" /> Dokumenti Online (Gist)
+                      <Github className="w-6 h-6 text-zinc-900 dark:text-white shrink-0" /> {t('Platforma Gist GitHub', 'GitHub Gist Platform')}
                    </h3>
                    <button onClick={() => setGistViewerModal(false)} className="p-2 bg-transparent text-zinc-500 hover:text-red-500 transition-colors">
                       <X className="w-5 h-5"/>
                    </button>
                 </div>
+
+                <div className={`p-4 border-b flex flex-wrap gap-2 ${isDark ? "bg-zinc-800/50 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+                    <button onClick={saveToGist} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-blue-600 hover:bg-blue-500 text-white border-transparent" : "bg-blue-500 hover:bg-blue-600 text-white border-transparent"}`}>
+                        <Upload className="w-4 h-4 inline-block mr-1" /> Shto në Gist (Upload)
+                    </button>
+                    <button onClick={loadFromGist} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm ${isDark ? "bg-orange-600 hover:bg-orange-500 text-white border-transparent" : "bg-orange-500 hover:bg-orange-600 text-white border-transparent"}`}>
+                        <Download className="w-4 h-4 inline-block mr-1" /> Rikthe nga Gist (Restore)
+                    </button>
+                    <button onClick={viewGistContent} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${isDark ? "bg-emerald-600 hover:bg-emerald-500 text-white border-transparent" : "bg-emerald-600 hover:bg-emerald-700 text-white border-transparent"}`}>
+                        <RefreshCw className="w-3.5 h-3.5" /> Rikthe / Ngarko listën
+                    </button>
+                </div>
+
                 <div className="p-5 overflow-y-auto flex-1 flex flex-col gap-3">
                    {gistViewerContent ? (
                        (() => {
                            try {
                                const parsedDocs = JSON.parse(gistViewerContent);
                                if (!Array.isArray(parsedDocs)) throw new Error();
+                               if (parsedDocs.length === 0) {
+                                  return (
+                                     <div className={`text-center py-10 ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
+                                        Nuk u gjet asnjë dokument online në Gist.
+                                     </div>
+                                  );
+                               }
                                return parsedDocs.map((docItem: any) => (
-                                   <div key={docItem.id} className={`flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 border rounded-xl gap-4 transition-colors ${isDark ? "bg-zinc-800 border-zinc-700" : "bg-zinc-50 border-zinc-200"}`}>
+                                   <div key={docItem.id} className={`flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 border rounded-xl gap-4 transition-colors ${
+                                      isDark ? "bg-zinc-950 border-zinc-800" : "bg-zinc-50 border-zinc-200"
+                                   }`}>
                                        <div className="flex-1">
                                           <h4 className={`font-bold ${textColor}`}>{docItem.title || 'I paemërtuar'}</h4>
-                                          <div className={`text-xs mt-1 flex items-center gap-3 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
-                                              <span>{docItem.rows?.length || 0} Rrjeshta</span>
+                                          <div className={`text-xs mt-1 flex items-center gap-3 ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
+                                              <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{safeFormatDate(docItem.createdAt, 'dd MMM yyyy')}</span>
+                                              <span>•</span>
+                                              <span>{docItem.rows?.length || 0} Rreshta</span>
                                               <span>•</span>
                                               <span>{docItem.headers?.length || 0} Kolona</span>
                                           </div>
+                                       </div>
+                                       
+                                       <div className="flex flex-wrap w-full sm:w-auto items-center justify-end gap-2">
+                                          <button onClick={() => {
+                                             const existing = documents.findIndex(d => d.id === docItem.id);
+                                             let newDocs = [...documents];
+                                             if (existing >= 0) newDocs[existing] = docItem;
+                                             else newDocs.push(docItem);
+                                             setDocuments(newDocs);
+                                             localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(newDocs));
+                                             showToast("Dokumenti nga Gist u ruajt në memorien e telefonit!");
+                                          }} className={`flex-grow sm:flex-grow-0 justify-center flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors border ${
+                                             isDark ? "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-300" : "bg-white hover:bg-zinc-100 border-zinc-300 text-zinc-700"
+                                          }`}>
+                                             <FolderDown className="w-4 h-4" /> <span className="sm:hidden lg:inline">Ruaj / Save</span>
+                                          </button>
+                                          <button onClick={() => {
+                                             openDocument(docItem);
+                                             setGistViewerModal(false);
+                                             showToast(`U hap dokumenti: ${docItem.title}`);
+                                          }} className={`flex-grow sm:flex-grow-0 justify-center flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors bg-accent-600 hover:bg-accent-500 text-white shadow-lg shadow-accent-600/20`}>
+                                             <FolderUp className="w-4 h-4" /> <span className="sm:hidden lg:inline">Hap / Preview</span>
+                                          </button>
                                        </div>
                                    </div>
                                ));
@@ -5082,7 +5120,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 </div>
              </div>
           </div>
-      )}
+       )}
 
       {/* CLOUD MODAL */}
       {cloudModal && (
@@ -5122,7 +5160,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                    {isFetchingCloud ? (
                       <div className="flex justify-center items-center py-10">
                          <Loader2 className="w-8 h-8 text-accent-500 animate-spin" />
-                      </div>
+                       </div>
                    ) : cloudDocs.length === 0 ? (
                       <div className={`text-center py-10 ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
                          Nuk u gjet asnjë dokument online.
@@ -5136,7 +5174,10 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                 <h4 className={`font-bold ${textColor}`}>{cDoc.title}</h4>
                                 <div className={`text-xs mt-1 flex items-center gap-3 ${isDark ? "text-zinc-500": "text-zinc-500"}`}>
                                    <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{safeFormatDate(cDoc.createdAt, 'dd MMM yyyy')}</span>
-                                   <span className="flex items-center gap-1"><Save className="w-3 h-3" />{safeFormatDate(cDoc.updatedAt, 'HH:mm')}</span>
+                                   <span>•</span>
+                                   <span>{cDoc.rows?.length || 0} Rreshta</span>
+                                   <span>•</span>
+                                   <span>{cDoc.headers?.length || 0} Kolona</span>
                                 </div>
                              </div>
                              
@@ -5161,23 +5202,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                    else newDocs.push(cDoc);
                                    setDocuments(newDocs);
                                    localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(newDocs));
-                                   openDocument(cDoc);
-                                   setCloudModal(false);
-                                   setAiChatModal(true);
-                                }} className={`p-3 sm:px-4 sm:py-2.5 text-sm font-medium rounded-lg transition-colors border ${
-                                   isDark ? "bg-accent-600 hover:bg-accent-500 text-white shadow-md border-transparent" : "bg-accent-500 hover:bg-accent-600 text-white shadow-md font-bold border-transparent"
-                                }`} title="Analizo me AI (AI Search)">
-                                   <Sparkles className="w-5 h-5 sm:w-4 sm:h-4 pointer-events-none" />
-                                </button>
-                                <button onClick={() => {
-                                   const existing = documents.findIndex(d => d.id === cDoc.id);
-                                   let newDocs = [...documents];
-                                   if (existing >= 0) newDocs[existing] = cDoc;
-                                   else newDocs.push(cDoc);
-                                   setDocuments(newDocs);
-                                   localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(newDocs));
                                    showToast("Dokumenti u ruajt në memorien e telefonit!");
-                                }} className={`flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors border ${
+                                }} className={`flex-grow sm:flex-grow-0 justify-center flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors border ${
                                    isDark ? "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-300" : "bg-white hover:bg-zinc-100 border-zinc-300 text-zinc-700"
                                 }`}>
                                    <FolderDown className="w-4 h-4" /> <span className="sm:hidden lg:inline">Ruaj / Save</span>
@@ -5185,7 +5211,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                 <button onClick={() => {
                                    openDocument(cDoc);
                                    setCloudModal(false);
-                                }} className={`flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors bg-accent-600 hover:bg-accent-500 text-white shadow-lg shadow-accent-600/20`}>
+                                }} className={`flex-grow sm:flex-grow-0 justify-center flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors bg-accent-600 hover:bg-accent-500 text-white shadow-lg shadow-accent-600/20`}>
                                    <FolderUp className="w-4 h-4" /> <span className="sm:hidden lg:inline">Hap / Preview</span>
                                 </button>
                              </div>
@@ -5195,7 +5221,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 </div>
              </div>
           </div>
-      )}
+       )}
 
       
     </>
