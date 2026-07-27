@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getDirectoryHandle, saveDirectoryHandle } from '../lib/directoryFS';
-import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen, Terminal, Copy, CheckCheck, Folder, User, Key, AlertTriangle } from 'lucide-react';
+import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen, Terminal, Copy, CheckCheck, Folder, User, Key, AlertTriangle, ArrowLeft, Edit } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { useFirebase } from '../hooks/useFirebase';
@@ -392,6 +392,22 @@ export function Notepad() {
   const [gistViewerContent, setGistViewerContent] = useState<string | null>(null);
   
   const [showCloudDropdown, setShowCloudDropdown] = useState(false);
+  const [onlineView, setOnlineView] = useState<'cloud' | 'gist' | null>(null);
+  const [selectedOnlineDoc, setSelectedOnlineDoc] = useState<GridDocument | null>(null);
+  const [isOnlineEditing, setIsOnlineEditing] = useState(false);
+  const [isOnlineAiThinking, setIsOnlineAiThinking] = useState(false);
+  const [onlineSearch, setOnlineSearch] = useState('');
+  const [secureLogoutModal, setSecureLogoutModal] = useState<{
+    isOpen: boolean;
+    target: 'cloud' | 'gist' | null;
+    onSuccess: (() => void) | null;
+  }>({ isOpen: false, target: null, onSuccess: null });
+  const [secureLogoutPasswordInput, setSecureLogoutPasswordInput] = useState('');
+  const [logoutInfoModal, setLogoutInfoModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+  } | null>(null);
   const isGistSyncingRef = useRef(false);
 
   const saveToGist = async (docsToSave: GridDocument[] = documents, silent = false) => {
@@ -501,10 +517,28 @@ export function Notepad() {
           
           const content = file.truncated ? await (await fetch(file.raw_url)).text() : file.content;
           setGistViewerContent(content);
-          setGistViewerModal(true);
+          
+          try {
+             const parsed = JSON.parse(content);
+             if (Array.isArray(parsed) && parsed.length > 0) {
+                setSelectedOnlineDoc(parsed[0]);
+             }
+          } catch(e){}
       } catch (err: any) {
           showToast(err.message);
       }
+  };
+
+  const openGistDashboard = async () => {
+     if (!gistId) {
+        showToast("Nuk ka Gist ID të caktuar. Së pari ruani diçka në Gist.");
+        setBackupModal(true);
+        return;
+     }
+     setOnlineView('gist');
+     setSelectedOnlineDoc(null);
+     setIsOnlineEditing(false);
+     await viewGistContent();
   };
 
   const loadFromGist = async () => {
@@ -1631,14 +1665,92 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
      setCloudDocToDelete(null);
   };
 
-  const openCloudModal = () => {
-     executeProtectedAction(() => {
-        setCloudModal(true);
-        const currentUser = auth.currentUser;
-        if (currentUser) {
-           fetchCloudDocs(getActiveUid()!);
+  const fetchCloudDocsOnly = async (silent = false) => {
+    setIsFetchingCloud(true);
+    const uid = getActiveUid()!;
+    const idToken = auth.currentUser ? await auth.currentUser.getIdToken(true).catch(() => null) : null;
+    const endpoints = getApiEndpoints(`/api/cloud/load?userId=${encodeURIComponent(uid)}`);
+
+    let loadedDocs: GridDocument[] | null = null;
+    for (const ep of endpoints) {
+      try {
+        const headers: Record<string, string> = {};
+        if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
+        const finalEp = idToken ? `${ep}&idToken=${encodeURIComponent(idToken)}` : ep;
+        const res = await fetch(finalEp, { headers });
+        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+          const json = await res.json();
+          if (json.documents && json.documents.length > 0) {
+            loadedDocs = json.documents;
+            break;
+          }
         }
-     });
+      } catch (e) {}
+    }
+
+    if (loadedDocs) {
+       setCloudDocs(loadedDocs);
+       setIsFetchingCloud(false);
+       return loadedDocs;
+    }
+
+    // Fallback to direct firestore get
+    if (user) {
+       try {
+          const q = query(collection(db, 'documents'), where('userId', '==', getActiveUid()!));
+          const snapshot = await getDocs(q);
+          const cloudData = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as GridDocument));
+          if (cloudData.length > 0) {
+             setCloudDocs(cloudData);
+             setIsFetchingCloud(false);
+             return cloudData;
+          }
+       } catch (e) {}
+    }
+    
+    setIsFetchingCloud(false);
+    if (!silent) showToast("Nuk u gjet asnjë dokument në Cloud.");
+    return null;
+  };
+
+  const restoreLoadedCloudDocsToLocal = async () => {
+     if (cloudDocs.length === 0) {
+        showToast("Nuk ka dokumente në Cloud për t'u rikthyer.");
+        return;
+     }
+     if (!window.confirm("A jeni i sigurt që dëshironi të zëvendësoni të gjitha shënimet lokale me ato nga Cloud?")) return;
+     
+     setDocuments(cloudDocs);
+     localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(cloudDocs));
+     showToast("⚡ Të gjitha shënimet u rikthyen me sukses!");
+  };
+
+  const openCloudModal = async () => {
+     if (!user) {
+        showToast("Ju lutem kyçuni me Email/Password ose Google për të hapur Cloud.");
+        setBackupModal(true);
+        return;
+     }
+     setOnlineView('cloud');
+     setSelectedOnlineDoc(null);
+     setIsOnlineEditing(false);
+     const docs = await fetchCloudDocsOnly(false);
+     if (docs && docs.length > 0) {
+        setSelectedOnlineDoc(docs[0]);
+     }
+  };
+
+  const handleSecureLogoutRequest = (target: 'cloud' | 'gist', onSuccess: () => void) => {
+     const savedPin = localStorage.getItem('grid_notepad_pin');
+     if (!savedPin) {
+        showToast("Së pari duhet të krijoni një Password/PIN për sigurinë e llogarisë tuaj!");
+        executeProtectedAction(() => {
+           handleSecureLogoutRequest(target, onSuccess);
+        });
+     } else {
+        setSecureLogoutPasswordInput('');
+        setSecureLogoutModal({ isOpen: true, target, onSuccess });
+     }
   };
 
   useEffect(() => {
@@ -3544,8 +3656,640 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       }
   };
 
+  const renderOnlineDashboard = () => {
+     const isGist = onlineView === 'gist';
+     const titleText = isGist ? "Platforma Gist GitHub" : "Platforma Cloud Google (Firebase)";
+     
+     let docsList: GridDocument[] = [];
+     if (isGist) {
+        try {
+           const parsed = JSON.parse(gistViewerContent || '[]');
+           if (Array.isArray(parsed)) docsList = parsed;
+        } catch(e){}
+     } else {
+        docsList = cloudDocs;
+     }
+
+     const filteredOnline = docsList.filter(d => {
+        if (!onlineSearch.trim()) return true;
+        const q = onlineSearch.toLowerCase();
+        return (d.title || '').toLowerCase().includes(q) || 
+               (d.tags || []).some(t => t.toLowerCase().includes(q));
+     });
+
+     const handleOnlineTitleChange = (val: string) => {
+        if (!selectedOnlineDoc) return;
+        setSelectedOnlineDoc({
+           ...selectedOnlineDoc,
+           title: val,
+           updatedAt: new Date().toISOString()
+        });
+     };
+
+     const handleOnlineTagsChange = (val: string) => {
+        if (!selectedOnlineDoc) return;
+        const tags = val.split(',').map(t => t.trim()).filter(t => t !== '');
+        setSelectedOnlineDoc({
+           ...selectedOnlineDoc,
+           tags,
+           updatedAt: new Date().toISOString()
+        });
+     };
+
+     const handleOnlineHeaderChange = (hIndex: number, val: string) => {
+        if (!selectedOnlineDoc) return;
+        const updatedHeaders = [...selectedOnlineDoc.headers];
+        updatedHeaders[hIndex] = val;
+        setSelectedOnlineDoc({
+           ...selectedOnlineDoc,
+           headers: updatedHeaders,
+           updatedAt: new Date().toISOString()
+        });
+     };
+
+     const handleOnlineCellChange = (rIndex: number, colKey: string, val: string) => {
+        if (!selectedOnlineDoc) return;
+        const updatedRows = selectedOnlineDoc.rows.map((r, idx) => {
+           if (idx === rIndex) {
+              return { ...r, [colKey]: val };
+           }
+           return r;
+        });
+        setSelectedOnlineDoc({
+           ...selectedOnlineDoc,
+           rows: updatedRows,
+           updatedAt: new Date().toISOString()
+        });
+     };
+
+     const saveOnlineEditedDoc = async () => {
+       if (!selectedOnlineDoc) return;
+       if (onlineView === 'cloud') {
+          const updatedDocsList = cloudDocs.map(d => d.id === selectedOnlineDoc.id ? selectedOnlineDoc : d);
+          setCloudDocs(updatedDocsList);
+          const success = await syncWithGoogleCloud(updatedDocsList, false);
+          if (success) {
+             setIsOnlineEditing(false);
+             showToast("⚡ Dokumenti u ruajt me sukses në Google Cloud!");
+          }
+       } else if (onlineView === 'gist') {
+          let parsedGistDocs: GridDocument[] = [];
+          try {
+             const parsed = JSON.parse(gistViewerContent || '[]');
+             if (Array.isArray(parsed)) parsedGistDocs = parsed;
+          } catch(e){}
+          
+          const updatedGistDocs = parsedGistDocs.map(d => d.id === selectedOnlineDoc.id ? selectedOnlineDoc : d);
+          setGistViewerContent(JSON.stringify(updatedGistDocs));
+          
+          try {
+             await saveToGist(updatedGistDocs, false);
+             setIsOnlineEditing(false);
+             showToast("⚡ Dokumenti u ruajt me sukses në GitHub Gist!");
+          } catch (err: any) {
+             showToast("Dështoi ruajtja në Gist: " + err.message);
+          }
+       }
+     };
+
+     const handleOnlineDeleteDoc = async () => {
+       if (!selectedOnlineDoc) return;
+       if (!window.confirm("A jeni i sigurt që dëshironi të fshini këtë dokument online?")) return;
+       
+       if (onlineView === 'cloud') {
+          try {
+             const updatedDocsList = cloudDocs.filter(d => d.id !== selectedOnlineDoc.id);
+             setCloudDocs(updatedDocsList);
+             setSelectedOnlineDoc(null);
+             await syncWithGoogleCloud(updatedDocsList, true);
+             showToast("⚡ Dokumenti u fshi nga Google Cloud me sukses!");
+          } catch (e) {
+             showToast("Gabim gjatë fshirjes nga Cloud.");
+          }
+       } else if (onlineView === 'gist') {
+          try {
+             let parsedGistDocs: GridDocument[] = [];
+             try {
+                const parsed = JSON.parse(gistViewerContent || '[]');
+                if (Array.isArray(parsed)) parsedGistDocs = parsed;
+             } catch(e){}
+             
+             const updatedGistDocs = parsedGistDocs.filter(d => d.id !== selectedOnlineDoc.id);
+             setGistViewerContent(JSON.stringify(updatedGistDocs));
+             setSelectedOnlineDoc(null);
+             
+             await saveToGist(updatedGistDocs, false);
+             showToast("⚡ Dokumenti u fshi nga GitHub Gist!");
+          } catch (err: any) {
+             showToast("Dështoi fshirja nga Gist: " + err.message);
+          }
+       }
+     };
+
+     const handleOnlineAiAutopilot = async () => {
+        if (!selectedOnlineDoc) return;
+        setIsOnlineAiThinking(true);
+        showToast("🤖 Inteligjenca Artificiale (Gemini) po analizon dhe korrigjon shënimet...");
+        try {
+           const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
+           const docsForAi = [{
+              ...selectedOnlineDoc,
+              rows: selectedOnlineDoc.rows.map(r => {
+                 const { image, ...rest } = r;
+                 return rest;
+              })
+           }];
+           
+           const payload = JSON.stringify({ 
+              prompt: "Autopilot Check: Kontrollo dhe auto-përditëso/korrigjo llogaritjet, plotëso kolonat totale/shuma të zbrazëta ose korrigjo drejtshkrimin nëse ka gabime të dukshme.", 
+              documents: docsForAi, 
+              activeDocId: selectedOnlineDoc.id, 
+              image: null, 
+              audio: null,
+              blueText: '',
+              secretList: [],
+              userEmail: mail,
+              geminiKey: userGeminiKey || localStorage.getItem('grid_notepad_gemini_key') || ''
+           });
+           
+           const endpoints = getApiEndpoints('/api/ai/chat');
+           let response: Response | null = null;
+           for (const ep of endpoints) {
+              try {
+                 const res = await fetch(ep, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: payload
+                 });
+                 if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+                    response = res;
+                    break;
+                 }
+              } catch (e) {}
+           }
+
+           if (response) {
+              const data = await response.json();
+              if (data && data.actions && Array.isArray(data.actions) && data.actions.length > 0) {
+                 let applied = false;
+                 data.actions.forEach((act: any) => {
+                     if ((act.type === 'PROPOSE_COLUMNS_CHANGE' || act.type === 'UPDATE_DOCUMENT_ROWS') && act.documentId === selectedOnlineDoc.id && act.newRows) {
+                         setSelectedOnlineDoc(prev => {
+                             if (!prev) return null;
+                             return {
+                                 ...prev,
+                                 headers: act.newHeaders || prev.headers,
+                                 columnWidths: act.newColumnWidths || prev.columnWidths,
+                                 rows: act.newRows,
+                                 updatedAt: new Date().toISOString()
+                             };
+                         });
+                         applied = true;
+                     }
+                 });
+                 if (applied) {
+                    showToast("✨ Agjenti Gemini korrigjoi llogaritjet dhe tekstet me sukses! Klikoni 'Ruaj' për t'i ruajtur në server.");
+                 } else {
+                    showToast("🤖 Gemini e analizoi dokumentin por nuk gjeti ndonjë gabim ose kolonë për të llogaritur.");
+                 }
+              } else {
+                 showToast("🤖 Gemini e analizoi dokumentin dhe konfirmoi se të dhënat janë të sakta e të plota!");
+              }
+           } else {
+              showToast("Gabim gjatë lidhjes me serverin AI.");
+           }
+        } catch (err: any) {
+           showToast("Gabim nga Gemini AI: " + err.message);
+        } finally {
+           setIsOnlineAiThinking(false);
+        }
+     };
+
+     return (
+        <div className={`w-full max-w-[1200px] mx-auto flex flex-col sm:border sm:rounded-xl shadow-2xl font-sans relative overflow-hidden h-[100dvh] sm:min-h-[600px] sm:h-[90vh] ${baseBg} ${borderColor} ${textColor} z-10`}>
+           {/* HEADER */}
+           <div className={`flex border-b py-3 px-4 gap-4 items-center justify-between shadow-sm sticky top-0 ${toolbarBg} ${borderColor} z-20`}>
+              <div className="flex items-center gap-3">
+                 <button 
+                    onClick={() => { setOnlineView(null); setSelectedOnlineDoc(null); setIsOnlineEditing(false); }}
+                    className={`p-2 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-bold border ${isDark ? "bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-200" : "bg-white border-zinc-200 hover:bg-zinc-50 text-zinc-700"}`}
+                 >
+                    <ArrowLeft className="w-4 h-4" /> {t('Kthehu', 'Back')}
+                 </button>
+                 <div className="flex flex-col">
+                    <span className="text-sm font-extrabold flex items-center gap-1.5 uppercase tracking-wide">
+                       {isGist ? <Github className="w-4 h-4 text-zinc-900 dark:text-white" /> : <Cloud className="w-4 h-4 text-emerald-500" />}
+                       {titleText}
+                    </span>
+                    <span className={`text-[10px] font-medium leading-tight ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                       {isGist 
+                          ? `Gist Stream: ${gistId ? gistId.substring(0, 12) + '...' : 'Unassigned'}` 
+                          : `Lidhur si: ${user?.email || 'genti8319@gmail.com'}`}
+                    </span>
+                 </div>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                 <button 
+                    onClick={async () => {
+                       if (isGist) {
+                          await viewGistContent();
+                       } else {
+                          await fetchCloudDocsOnly(false);
+                       }
+                    }} 
+                    className={`p-2 rounded-lg transition-colors border ${isDark ? "bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-200" : "bg-white border-zinc-200 hover:bg-zinc-50 text-zinc-700"}`}
+                    title="Rifresko të dhënat"
+                 >
+                    <RefreshCw className={`w-4 h-4 ${isFetchingCloud ? "animate-spin text-accent-500" : ""}`} />
+                 </button>
+              </div>
+           </div>
+
+           {/* MAIN CONTAINER (SPLIT SCREEN) */}
+           <div className="flex-1 flex flex-col md:flex-row overflow-hidden w-full">
+              {/* LEFT SIDEBAR (ONLINE DOCUMENTS LIST) */}
+              <div className={`w-full md:w-80 border-b md:border-b-0 md:border-r flex flex-col shrink-0 overflow-hidden ${isDark ? "border-zinc-800 bg-zinc-950/20" : "border-zinc-200 bg-zinc-50/40"}`}>
+                 {/* Search Box */}
+                 <div className="p-3 border-b border-zinc-200 dark:border-zinc-800">
+                    <div className="relative">
+                       <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                       <input 
+                          type="text"
+                          value={onlineSearch}
+                          onChange={(e) => setOnlineSearch(e.target.value)}
+                          placeholder="Kërko dokument online..."
+                          className={`w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border focus:outline-none focus:border-accent-500 transition-colors ${
+                             isDark ? "bg-zinc-900 border-zinc-800 text-white placeholder-zinc-600" : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400"
+                          }`}
+                       />
+                    </div>
+                 </div>
+
+                 {/* Documents List */}
+                 <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                    {filteredOnline.length === 0 ? (
+                       <div className="text-center py-10 text-xs text-zinc-500 font-medium">
+                          Nuk u gjet asnjë dokument online.
+                       </div>
+                    ) : (
+                       filteredOnline.map(d => {
+                          const isSelected = selectedOnlineDoc?.id === d.id;
+                          return (
+                             <button
+                                key={d.id}
+                                onClick={() => {
+                                   setSelectedOnlineDoc(d);
+                                   setIsOnlineEditing(false);
+                                }}
+                                className={`w-full p-3 rounded-xl border text-left transition-all relative ${
+                                   isSelected 
+                                      ? (isDark ? "bg-accent-600/10 border-accent-500/50" : "bg-accent-50 border-accent-300")
+                                      : (isDark ? "bg-zinc-900/40 border-zinc-800 hover:bg-zinc-900/80" : "bg-white border-zinc-200 hover:bg-zinc-50")
+                                }`}
+                             >
+                                <h4 className="font-bold text-xs sm:text-sm line-clamp-1">{d.title || "I paemërtuar"}</h4>
+                                <div className="text-[10px] mt-1.5 flex items-center justify-between text-zinc-500">
+                                   <span className="flex items-center gap-1">
+                                      <Calendar className="w-3 h-3" />
+                                      {safeFormatDate(d.createdAt, 'dd MMM yyyy')}
+                                   </span>
+                                   <span>{d.rows?.length || 0} rreshta</span>
+                                </div>
+                                {d.tags && d.tags.length > 0 && (
+                                   <div className="flex flex-wrap gap-1 mt-1.5">
+                                      {d.tags.map(t => (
+                                         <span key={t} className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-400 border border-zinc-500/20">
+                                            #{t}
+                                         </span>
+                                      ))}
+                                   </div>
+                                )}
+                             </button>
+                          );
+                       })
+                    )}
+                 </div>
+              </div>
+
+              {/* RIGHT PANEL (RICH PREVIEW & MANAGEMENT) */}
+              <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-zinc-950">
+                 {!selectedOnlineDoc ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+                       <div className="w-16 h-16 rounded-full bg-accent-500/10 flex items-center justify-center mb-4">
+                          {isGist ? <Github className="w-8 h-8 text-zinc-400" /> : <Cloud className="w-8 h-8 text-emerald-500" />}
+                       </div>
+                       <h3 className="font-bold text-base mb-1">{t('Zgjidhni një Dokument', 'Select a Document')}</h3>
+                       <p className="text-xs text-zinc-500 max-w-sm">
+                          {t('Zgjidhni një dokument nga lista në të majtë për të parë përmbajtjen online, për ta redaktuar ose sinkronizuar.', 'Select a document from the list on the left to see online content, edit, or sync.')}
+                       </p>
+                    </div>
+                 ) : (
+                    <div className="flex-1 flex flex-col overflow-hidden">
+                       {/* DOC PREVIEW HEADER & INFO */}
+                       <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-col gap-2 shrink-0">
+                          {isOnlineEditing ? (
+                             <div className="flex flex-col gap-2">
+                                <div className="flex flex-col gap-1">
+                                   <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider">Titulli i Shënimit:</label>
+                                   <input 
+                                      type="text"
+                                      value={selectedOnlineDoc.title}
+                                      onChange={(e) => handleOnlineTitleChange(e.target.value)}
+                                      className={`px-3 py-1.5 text-sm font-bold rounded border outline-none focus:border-accent-500 ${
+                                         isDark ? "bg-zinc-900 border-zinc-800 text-white" : "bg-zinc-50 border-zinc-300 text-zinc-900"
+                                      }`}
+                                   />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                   <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider">Etiketat (të ndara me presje):</label>
+                                   <input 
+                                      type="text"
+                                      value={(selectedOnlineDoc.tags || []).join(', ')}
+                                      onChange={(e) => handleOnlineTagsChange(e.target.value)}
+                                      className={`px-3 py-1.5 text-xs font-semibold rounded border outline-none focus:border-accent-500 ${
+                                         isDark ? "bg-zinc-900 border-zinc-800 text-white" : "bg-zinc-50 border-zinc-300 text-zinc-900"
+                                      }`}
+                                      placeholder="Psh. pune, sekrete"
+                                   />
+                                </div>
+                             </div>
+                          ) : (
+                             <div>
+                                <h2 className="text-lg font-bold">{selectedOnlineDoc.title || "I paemërtuar"}</h2>
+                                <div className="flex items-center gap-3 mt-1.5 text-xs text-zinc-500">
+                                   <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {safeFormatDate(selectedOnlineDoc.createdAt, 'dd MMM yyyy HH:mm')}</span>
+                                   <span>•</span>
+                                   <span>{selectedOnlineDoc.rows?.length || 0} rreshta</span>
+                                </div>
+                                {selectedOnlineDoc.tags && selectedOnlineDoc.tags.length > 0 && (
+                                   <div className="flex flex-wrap gap-1 mt-2">
+                                      {selectedOnlineDoc.tags.map(t => (
+                                         <span key={t} className="text-[9px] font-bold px-2 py-0.5 rounded bg-zinc-500/10 text-zinc-400 border border-zinc-500/20">
+                                            #{t}
+                                         </span>
+                                      ))}
+                                   </div>
+                                )}
+                             </div>
+                          )}
+                       </div>
+
+                       {/* REQUIRED MANAGEMENT TOOLBAR: Save, Edittext, restoreall, delete, AI */}
+                       <div className={`px-4 py-2.5 border-b flex flex-wrap gap-2 items-center justify-between shrink-0 ${isDark ? "bg-zinc-900/40 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+                          <div className="flex flex-wrap gap-1.5">
+                             {/* EDIT TEXT / MODE */}
+                             <button
+                                onClick={() => setIsOnlineEditing(!isOnlineEditing)}
+                                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 border active:scale-95 ${
+                                   isOnlineEditing
+                                      ? "bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border-amber-500/20 animate-pulse"
+                                      : (isDark ? "bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-200" : "bg-white border-zinc-300 hover:bg-zinc-100 text-zinc-700")
+                                }`}
+                             >
+                                <Edit className="w-3.5 h-3.5" /> {t('Edittext', 'Edittext')}
+                             </button>
+
+                             {/* SAVE BUTTON */}
+                             <button
+                                onClick={saveOnlineEditedDoc}
+                                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 border active:scale-95 ${
+                                   isDark ? "bg-green-600 hover:bg-green-500 text-white border-transparent" : "bg-green-500 hover:bg-green-600 text-white border-transparent"
+                                }`}
+                             >
+                                <Save className="w-3.5 h-3.5" /> {t('Save', 'Save')}
+                             </button>
+
+                             {/* RESTORE ALL */}
+                             <button
+                                onClick={async () => {
+                                   if (isGist) {
+                                      await loadFromGist();
+                                   } else {
+                                      await handleFullCloudRestore();
+                                   }
+                                }}
+                                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 border active:scale-95 ${
+                                   isDark ? "bg-orange-600 hover:bg-orange-500 text-white border-transparent" : "bg-orange-500 hover:bg-orange-600 text-white border-transparent"
+                                }`}
+                             >
+                                <Download className="w-3.5 h-3.5" /> {t('restoreall', 'restoreall')}
+                             </button>
+
+                             {/* DELETE */}
+                             <button
+                                onClick={handleOnlineDeleteDoc}
+                                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 border active:scale-95 ${
+                                   isDark ? "bg-red-600/10 hover:bg-red-600/20 text-red-500 border-red-500/20" : "bg-red-50 hover:bg-red-100 text-red-500 border-red-200"
+                                }`}
+                             >
+                                <Trash2 className="w-3.5 h-3.5" /> {t('delete', 'delete')}
+                             </button>
+                          </div>
+
+                          {/* AI GEMINI */}
+                          <button
+                             onClick={handleOnlineAiAutopilot}
+                             disabled={isOnlineAiThinking}
+                             className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 border active:scale-95 ${
+                                isDark ? "bg-purple-600 hover:bg-purple-500 text-white border-transparent shadow-lg shadow-purple-600/20" : "bg-purple-500 hover:bg-purple-600 text-white border-transparent shadow-lg shadow-purple-500/20"
+                             } disabled:opacity-50 disabled:cursor-not-allowed`}
+                          >
+                             {isOnlineAiThinking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                             {t('AI', 'AI')}
+                          </button>
+                       </div>
+
+                       {/* RICH PREVIEW */}
+                       <div className="flex-1 overflow-auto p-4">
+                          <div className={`border rounded-xl overflow-hidden ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
+                             {/* GRID HEADERS */}
+                             <div className={`flex border-b min-h-[34px] items-center shrink-0 ${isDark ? "bg-zinc-900/80 border-zinc-800 text-zinc-300" : "bg-zinc-50 border-zinc-200 text-zinc-700"}`}>
+                                <div className="w-12 shrink-0 border-r border-zinc-800/20 dark:border-zinc-200/10 flex items-center justify-center text-[10px] font-bold font-mono">
+                                   NR
+                                </div>
+                                {selectedOnlineDoc.headers?.map((h, hIdx) => (
+                                   <div key={hIdx} className="flex-1 border-r border-zinc-800/20 dark:border-zinc-200/10 p-1.5 text-center text-xs font-bold">
+                                      {isOnlineEditing ? (
+                                         <input 
+                                            type="text"
+                                            value={h}
+                                            onChange={(e) => handleOnlineHeaderChange(hIdx, e.target.value)}
+                                            className={`w-full text-center text-xs bg-transparent focus:outline-none focus:text-accent-500 transition-colors border-b border-transparent focus:border-accent-500/30 ${
+                                               isDark ? "text-white" : "text-zinc-900"
+                                            }`}
+                                         />
+                                      ) : (
+                                         <span>{h}</span>
+                                      )}
+                                   </div>
+                                ))}
+                             </div>
+
+                             {/* GRID BODY */}
+                             <div className="divide-y divide-zinc-200 dark:divide-zinc-800/40">
+                                {selectedOnlineDoc.rows?.map((r, rIdx) => (
+                                   <div 
+                                      key={r.id || rIdx} 
+                                      className={`flex min-h-[28px] items-center transition-colors ${
+                                         r.status === 'ok' ? (isDark ? 'bg-green-500/10 border-green-500/20' : 'bg-green-50 border-green-100')
+                                         : r.status === 'blue' ? (isDark ? 'bg-blue-500/10 border-blue-500/20' : 'bg-blue-50 border-blue-100')
+                                         : r.status === 'x' ? (isDark ? 'bg-red-500/10 border-red-500/20 line-through' : 'bg-red-50 border-red-100 line-through')
+                                         : isDark ? "border-zinc-800/40 focus-within:bg-zinc-900/40" : "border-zinc-200/40 focus-within:bg-zinc-50"
+                                      }`}
+                                   >
+                                      {/* Row number column */}
+                                      <div className={`w-12 shrink-0 border-r flex items-center justify-center text-xs font-mono font-bold py-1 ${
+                                         isDark ? "bg-zinc-900/40 border-zinc-800/40 text-zinc-500" : "bg-zinc-100/60 border-zinc-200/40 text-zinc-500"
+                                      }`}>
+                                         {rIdx + 1}
+                                      </div>
+
+                                      {/* Row cells */}
+                                      {selectedOnlineDoc.headers?.map((_, hIdx) => {
+                                         const colKey = `col${hIdx+1}`;
+                                         const cellVal = r[colKey] || '';
+                                         return (
+                                            <div key={hIdx} className="flex-1 border-r border-zinc-200/20 dark:border-zinc-800/20 p-1">
+                                               {isOnlineEditing ? (
+                                                  <input 
+                                                     type="text"
+                                                     value={cellVal}
+                                                     onChange={(e) => handleOnlineCellChange(rIdx, colKey, e.target.value)}
+                                                     className={`w-full bg-transparent px-1 py-0.5 text-xs outline-none focus:bg-zinc-500/5 focus:border-accent-500/30 border border-transparent rounded ${
+                                                        isDark ? "text-zinc-200" : "text-zinc-800"
+                                                     }`}
+                                                  />
+                                               ) : (
+                                                  <span className={`text-xs px-1 block break-all whitespace-pre-wrap leading-tight ${
+                                                     r.status === 'x' ? "line-through text-red-500/70" 
+                                                     : r.status === 'blue' ? "text-blue-500 font-semibold"
+                                                     : r.status === 'ok' ? "text-green-600 font-semibold"
+                                                     : isDark ? "text-zinc-300" : "text-zinc-800"
+                                                  }`}>
+                                                     {cellVal}
+                                                  </span>
+                                               )}
+                                            </div>
+                                         );
+                                      })}
+                                   </div>
+                                ))}
+                             </div>
+                          </div>
+                       </div>
+                    </div>
+                 )}
+              </div>
+           </div>
+        </div>
+     );
+  };
+
+  const renderSecureLogoutModal = () => {
+    if (!secureLogoutModal.isOpen) return null;
+    return (
+       <div className="fixed inset-0 z-[300] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in">
+         <div className={`max-w-md w-full p-6 rounded-2xl shadow-2xl border flex flex-col items-center ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"}`}>
+             <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
+                 <Lock className="w-6 h-6 text-red-500" />
+             </div>
+             <h3 className="text-lg font-extrabold mb-1.5 text-center">{t('Konfirmo Shkyçjen e Sigurt', 'Confirm Security Logout')}</h3>
+             <p className={`text-xs text-center mb-6 leading-relaxed ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+                {t(
+                  'Vëmendje! Po shkyçni llogarinë tuaj dhe po ndërpritni sinkronizimin në kohe reale. Për sigurinë e shënimeve tuaja, shkruani PIN-in tuaj aktual.',
+                  'Attention! You are logging out and disconnecting real-time sync. For the security of your notes, please enter your PIN.'
+                )}
+             </p>
+             <input 
+                type="password"
+                value={secureLogoutPasswordInput}
+                onChange={e => setSecureLogoutPasswordInput(e.target.value)}
+                className={`w-full text-center text-2xl tracking-[0.3em] font-black py-3 px-4 rounded-xl mb-4 border outline-none transition-colors shadow-inner ${
+                   isDark ? "bg-zinc-950 border-zinc-700 text-white focus:border-red-500" : "bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-red-500"
+                }`}
+                autoFocus
+                placeholder="****"
+             />
+             <div className="flex gap-2.5 w-full">
+                <button 
+                   onClick={() => {
+                      setSecureLogoutModal({ isOpen: false, target: null, onSuccess: null });
+                      setSecureLogoutPasswordInput('');
+                   }} 
+                   className={`flex-1 py-2.5 rounded-lg font-bold text-xs border ${
+                      isDark ? "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-300" : "bg-white hover:bg-zinc-100 border-zinc-300 text-zinc-700"
+                   }`}
+                >
+                   {t('Anulo', 'Cancel')}
+                </button>
+                <button 
+                   onClick={async () => {
+                      const savedPin = localStorage.getItem('grid_notepad_pin') || '';
+                      if (secureLogoutPasswordInput === savedPin) {
+                         const target = secureLogoutModal.target;
+                         const successCallback = secureLogoutModal.onSuccess;
+                         
+                         setSecureLogoutModal({ isOpen: false, target: null, onSuccess: null });
+                         setSecureLogoutPasswordInput('');
+                         
+                         if (successCallback) {
+                            await successCallback();
+                         }
+                         
+                         // Show success info notification modal with complete details
+                         setLogoutInfoModal({
+                            isOpen: true,
+                            title: target === 'cloud' ? "Dritare Informuese: Cloud u shkyç me sukses" : "Dritare Informuese: Gist u shkyç me sukses",
+                            message: target === 'cloud' 
+                              ? "Lidhja me Platformën Cloud Google u ndërpre në mënyrë të sigurt. Memory ruajtëse lokale në pajisje mbetet aktive, ndërsa sinkronizimi online në kohë reale është çaktivizuar sipas rregullores së sigurisë. Të dhënat tuaja ekzistuese online mbeten të mbrojtura në server."
+                              : "Lidhja me GitHub Gist Stream u ndërpre në mënyrë të sigurt. Për të riaktivizuar sinkronizimin, duhet të vendosni përsëri çelësin tuaj të autorizimit."
+                         });
+                      } else {
+                         alert(t('Password i gabuar!', 'Incorrect password!'));
+                      }
+                   }} 
+                   className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition-colors text-xs"
+                >
+                   {t('Po, Shkyç', 'Yes, Logout')}
+                </button>
+             </div>
+         </div>
+       </div>
+    );
+  };
+
+  const renderLogoutInfoModal = () => {
+     if (!logoutInfoModal || !logoutInfoModal.isOpen) return null;
+     return (
+        <div className="fixed inset-0 z-[310] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in">
+           <div className={`max-w-md w-full p-6 rounded-2xl shadow-2xl border flex flex-col ${isDark ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-200 text-zinc-900"}`}>
+              <div className="flex justify-between items-center pb-3 border-b border-zinc-500/10 mb-4">
+                 <h4 className="text-sm font-extrabold flex items-center gap-2 text-emerald-500">
+                    <Check className="w-5 h-5" /> {logoutInfoModal.title}
+                 </h4>
+                 <button onClick={() => setLogoutInfoModal(null)} className="p-1 hover:text-red-500 transition-colors">
+                    <X className="w-4 h-4" />
+                 </button>
+              </div>
+              <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400 mb-5 whitespace-pre-line">
+                 {logoutInfoModal.message}
+              </p>
+              <button 
+                 onClick={() => setLogoutInfoModal(null)} 
+                 className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-colors text-xs"
+              >
+                 Mbyll Njoftimin
+              </button>
+           </div>
+        </div>
+     );
+  };
+
   const renderSharedModals = () => (
     <>
+      {renderSecureLogoutModal()}
+      {renderLogoutInfoModal()}
       {/* CONFIRMATION MODAL - DELETE DOC */}
       {docToDelete && (
          <div className="fixed inset-0 z-[200] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center bg-black/60 p-4 animate-in fade-in">
@@ -3988,9 +4732,10 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                             </div>
                             <button
                                type="button"
-                               onClick={async () => {
-                                  await hookLogout();
-                                  showToast("U çkyçët me sukses nga Cloud!");
+                               onClick={() => {
+                                  handleSecureLogoutRequest('cloud', async () => {
+                                     await hookLogout();
+                                  });
                                }}
                                className="px-3.5 py-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 font-bold text-xs rounded-lg border border-red-500/20 transition-all flex items-center justify-center gap-1.5"
                             >
@@ -4928,13 +5673,10 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                             <div className="p-3 rounded-xl border bg-emerald-500/10 border-emerald-500/20 text-xs text-emerald-500 font-semibold flex items-center justify-between">
                                <span>Llogaria: <span className="font-bold">{user.email}</span></span>
                                <button 
-                                 onClick={async () => {
-                                    try {
+                                 onClick={() => {
+                                    handleSecureLogoutRequest('cloud', async () => {
                                        await hookLogout();
-                                       showToast("U çkyçët me sukses!");
-                                    } catch (err: any) {
-                                       showToast(err.message);
-                                    }
+                                    });
                                  }}
                                  className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded font-bold uppercase text-[10px] transition-all"
                                >
@@ -5156,6 +5898,25 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                           </div>
                        </div>
 
+                       {gistToken && (
+                          <div className="flex justify-end pb-3">
+                             <button
+                                type="button"
+                                onClick={() => {
+                                   handleSecureLogoutRequest('gist', () => {
+                                      setGistToken('');
+                                      setGistId('');
+                                      localStorage.removeItem('grid_notepad_gist_token');
+                                      localStorage.removeItem('grid_notepad_gist_id');
+                                    });
+                                }}
+                                className="px-3 py-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 rounded-lg text-xs font-bold border border-red-500/20 flex items-center gap-1.5 active:scale-95 transition-all"
+                             >
+                                <LogOut className="w-3.5 h-3.5" /> {t('Shkyç Gist (Çaktivizo)', 'Disconnect Gist')}
+                             </button>
+                          </div>
+                       )}
+
                        <div className="flex flex-col sm:flex-row gap-3">
                            <button onClick={saveToGist} className="flex-1 flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20">
                               <Upload className="w-4 h-4" /> {t('Shto në Gist', 'Push to Gist')}
@@ -5163,7 +5924,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                            <button onClick={loadFromGist} className={`flex-1 flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors border ${isDark ? "bg-orange-600 hover:bg-orange-500 text-white shadow-md border-transparent" : "bg-orange-500 hover:bg-orange-600 text-white shadow-md font-bold border-transparent"}`}>
                               <Download className="w-4 h-4" /> {t('Rikthe nga Gist', 'Restore All')}
                            </button>
-                           <button onClick={viewGistContent} className={`flex-1 flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors border ${isDark ? "bg-green-600 hover:bg-green-500 text-white shadow-md border-transparent" : "bg-green-500 hover:bg-green-600 text-white shadow-md font-bold border-transparent"}`}>
+                           <button onClick={openGistDashboard} className={`flex-1 flex justify-center items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors border ${isDark ? "bg-green-600 hover:bg-green-500 text-white shadow-md border-transparent" : "bg-green-500 hover:bg-green-600 text-white shadow-md font-bold border-transparent"}`}>
                               <FolderOpen className="w-4 h-4" /> {t('Listo Gist', 'List Gist')}
                            </button>
                         </div>
@@ -5409,6 +6170,10 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
     </div>
   ) : null;
 
+  if (onlineView) {
+     return renderOnlineDashboard();
+  }
+
   // CATALOG VIEW
   if (!activeDocId) {
     return (
@@ -5431,9 +6196,11 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                       <LogIn className="w-4 h-4" /> <span className="hidden sm:inline">{t('Hyrje', 'Login')}</span>
                    </button>
                ) : (
-                   <button onClick={async () => {
-                      localStorage.removeItem('grid_notepad_saved_pwd');
-                      await hookLogout(); showToast("U çkyçët me sukses nga Cloud!");
+                   <button onClick={() => {
+                      handleSecureLogoutRequest('cloud', async () => {
+                         localStorage.removeItem('grid_notepad_saved_pwd');
+                         await hookLogout();
+                      });
                    }} className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border ${isDark ? "bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-300" : "bg-white border-zinc-300 hover:bg-zinc-100 text-zinc-700"}`}>
                       <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">{t('Dil', 'Logout')}</span>
                    </button>
