@@ -392,6 +392,9 @@ export function Notepad() {
   const [gistViewerContent, setGistViewerContent] = useState<string | null>(null);
   
   const [showCloudDropdown, setShowCloudDropdown] = useState(false);
+  const [showOnlineSettingsMenu, setShowOnlineSettingsMenu] = useState(false);
+  const [showGistSettings, setShowGistSettings] = useState(false);
+  const [showCloudSettingsState, setShowCloudSettingsState] = useState(false);
   const [onlineView, setOnlineView] = useState<'cloud' | 'gist' | null>(null);
   const [selectedOnlineDoc, setSelectedOnlineDoc] = useState<GridDocument | null>(null);
   const [isOnlineEditing, setIsOnlineEditing] = useState(false);
@@ -580,15 +583,12 @@ export function Notepad() {
   };
 
   const openGistDashboard = async () => {
-     if (!gistId) {
-        showToast("Nuk ka Gist ID të caktuar. Së pari ruani diçka në Gist.");
-        setBackupModal(true);
-        return;
-     }
      setOnlineView('gist');
      setSelectedOnlineDoc(null);
      setIsOnlineEditing(false);
-     await viewGistContent();
+     if (gistId) {
+        await viewGistContent();
+     }
   };
 
   const loadFromGist = async () => {
@@ -1736,8 +1736,12 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
   };
 
   const fetchCloudDocsOnly = async (silent = false) => {
+    const uid = getActiveUid();
+    if (!uid) {
+       setIsFetchingCloud(false);
+       return null;
+    }
     setIsFetchingCloud(true);
-    const uid = getActiveUid()!;
     const idToken = auth.currentUser ? await auth.currentUser.getIdToken(true).catch(() => null) : null;
     const endpoints = getApiEndpoints(`/api/cloud/load?userId=${encodeURIComponent(uid)}`);
 
@@ -1810,17 +1814,14 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
   };
 
   const openCloudModal = async () => {
-     if (!user) {
-        showToast("Ju lutem kyçuni me Email/Password ose Google për të hapur Cloud.");
-        setBackupModal(true);
-        return;
-     }
      setOnlineView('cloud');
      setSelectedOnlineDoc(null);
      setIsOnlineEditing(false);
-     const docs = await fetchCloudDocsOnly(false);
-     if (docs && docs.length > 0) {
-        setSelectedOnlineDoc(docs[0]);
+     if (user) {
+        const docs = await fetchCloudDocsOnly(false);
+        if (docs && docs.length > 0) {
+           setSelectedOnlineDoc(docs[0]);
+        }
      }
   };
 
@@ -3748,7 +3749,11 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
      if (isGist) {
         try {
            const parsed = JSON.parse(gistViewerContent || '[]');
-           if (Array.isArray(parsed)) docsList = parsed;
+           if (Array.isArray(parsed)) {
+              docsList = parsed;
+           } else if (parsed && typeof parsed === 'object') {
+              docsList = parsed.documents || [];
+           }
         } catch(e){}
      } else {
         docsList = cloudDocs;
@@ -3818,16 +3823,29 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
           }
        } else if (onlineView === 'gist') {
           let parsedGistDocs: GridDocument[] = [];
+          let currentGistBlueText = onlineBlueText;
+          let currentGistSecretList = onlineSecretList;
           try {
-             const parsed = JSON.parse(gistViewerContent || '[]');
-             if (Array.isArray(parsed)) parsedGistDocs = parsed;
+             const parsed = JSON.parse(gistViewerContent || '{}');
+             if (Array.isArray(parsed)) {
+                parsedGistDocs = parsed;
+             } else if (parsed && typeof parsed === 'object') {
+                parsedGistDocs = parsed.documents || [];
+                if (parsed.blueText !== undefined) currentGistBlueText = parsed.blueText;
+                if (parsed.secretList !== undefined) currentGistSecretList = parsed.secretList;
+             }
           } catch(e){}
           
           const updatedGistDocs = parsedGistDocs.map(d => d.id === selectedOnlineDoc.id ? selectedOnlineDoc : d);
-          setGistViewerContent(JSON.stringify(updatedGistDocs));
+          const finalGistObj = {
+             documents: updatedGistDocs,
+             blueText: currentGistBlueText,
+             secretList: currentGistSecretList
+          };
+          setGistViewerContent(JSON.stringify(finalGistObj));
           
           try {
-             await saveToGist(updatedGistDocs, false);
+             await saveToGist(updatedGistDocs, false, currentGistBlueText, currentGistSecretList);
              setIsOnlineEditing(false);
              showToast("⚡ Dokumenti u ruajt me sukses në GitHub Gist!");
           } catch (err: any) {
@@ -3853,17 +3871,30 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
        } else if (onlineView === 'gist') {
           try {
              let parsedGistDocs: GridDocument[] = [];
+             let currentGistBlueText = onlineBlueText;
+             let currentGistSecretList = onlineSecretList;
              try {
-                const parsed = JSON.parse(gistViewerContent || '[]');
-                if (Array.isArray(parsed)) parsedGistDocs = parsed;
+                const parsed = JSON.parse(gistViewerContent || '{}');
+                if (Array.isArray(parsed)) {
+                   parsedGistDocs = parsed;
+                } else if (parsed && typeof parsed === 'object') {
+                   parsedGistDocs = parsed.documents || [];
+                   if (parsed.blueText !== undefined) currentGistBlueText = parsed.blueText;
+                   if (parsed.secretList !== undefined) currentGistSecretList = parsed.secretList;
+                }
              } catch(e){}
              
              const updatedGistDocs = parsedGistDocs.filter(d => d.id !== selectedOnlineDoc.id);
-             setGistViewerContent(JSON.stringify(updatedGistDocs));
+             const finalGistObj = {
+                documents: updatedGistDocs,
+                blueText: currentGistBlueText,
+                secretList: currentGistSecretList
+             };
+             setGistViewerContent(JSON.stringify(finalGistObj));
              setSelectedOnlineDoc(null);
              
-             await saveToGist(updatedGistDocs, false);
-             showToast("⚡ Dokumenti u fshi nga GitHub Gist!");
+             await saveToGist(updatedGistDocs, false, currentGistBlueText, currentGistSecretList);
+             showToast("⚡ Dokumenti u fshi nga GitHub Gist me sukses!");
           } catch (err: any) {
              showToast("Dështoi fshirja nga Gist: " + err.message);
           }
@@ -4031,9 +4062,189 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
            </div>
 
            {/* MAIN CONTAINER (SPLIT SCREEN OR ACTIVE TAB VIEW) */}
-           <div className="flex-1 flex flex-col md:flex-row overflow-hidden w-full">
-              {onlineDashboardTab === 'lists' ? (
+           <div className="flex-1 flex flex-col md:flex-row overflow-hidden w-full relative">
+              {isGist && !gistId ? (
+                 <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto my-auto space-y-4">
+                    <Github className="w-12 h-12 text-blue-500 animate-pulse" />
+                    <h3 className="text-lg font-bold">Lidhja me GitHub Gist</h3>
+                    <p className="text-xs text-zinc-500 leading-relaxed">
+                       Vendosni një Token personal nga GitHub (PAT) për të sinkronizuar dhe krijuar automatikisht një Gist të ri për Notebook-un tuaj.
+                    </p>
+                    
+                    <div className="w-full space-y-3 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-500/5 text-left">
+                       <div>
+                          <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                             GitHub Access Token (PAT)
+                          </label>
+                          <input
+                             type="password"
+                             placeholder="ghp_..."
+                             value={gistToken}
+                             onChange={(e) => {
+                                setGistToken(e.target.value);
+                                localStorage.setItem('grid_notepad_gist_token', e.target.value);
+                             }}
+                             className={`w-full px-3 py-2 rounded-lg border text-xs outline-none focus:border-accent-500 transition-colors ${
+                                isDark ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-300 text-zinc-900"
+                             }`}
+                          />
+                       </div>
+                       
+                       <button
+                          onClick={async () => {
+                             if (!gistToken.trim()) {
+                                showToast("Ju lutem plotësoni GitHub Token!");
+                                return;
+                             }
+                             try {
+                                showToast("Duke krijuar Gist të ri...");
+                                await saveToGist(documents, false, blueText, secretList);
+                                showToast("Gist i ri u kriua dhe u sinkronizua me sukses!");
+                             } catch(e: any) {
+                                showToast("Dështoi sinkronizimi: " + e.message);
+                             }
+                          }}
+                          className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition-colors"
+                       >
+                          Krijo Gist të Ri & Sinkronizo
+                       </button>
+
+                       <div className="relative flex py-1 items-center">
+                          <div className="flex-grow border-t border-zinc-200 dark:border-zinc-800"></div>
+                          <span className="flex-shrink mx-2 text-[9px] text-zinc-400 uppercase font-bold">ose lidh një ekzistues</span>
+                          <div className="flex-grow border-t border-zinc-200 dark:border-zinc-800"></div>
+                       </div>
+
+                       <div>
+                          <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                             Gist ID ekzistues
+                          </label>
+                          <input
+                             type="text"
+                             placeholder="Vendos ID-në e Gist-it..."
+                             value={gistId}
+                             onChange={(e) => {
+                                setGistId(e.target.value);
+                                localStorage.setItem('grid_notepad_gist_id', e.target.value);
+                             }}
+                             className={`w-full px-3 py-2 rounded-lg border text-xs outline-none focus:border-accent-500 transition-colors ${
+                                isDark ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-300 text-zinc-900"
+                             }`}
+                          />
+                       </div>
+
+                       {gistId && (
+                          <button
+                             onClick={async () => {
+                                try {
+                                   showToast("Duke u lidhur me Gist...");
+                                   await viewGistContent();
+                                   showToast("Lidhja me Gist-in ekzistues u krye me sukses!");
+                                } catch(e: any) {
+                                   showToast("Gist nuk u gjet ose dështoi: " + e.message);
+                                }
+                             }}
+                             className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors"
+                          >
+                             Ngarko nga Gist Ekzistues
+                          </button>
+                       )}
+                    </div>
+                 </div>
+              ) : !isGist && !user ? (
+                 <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto my-auto space-y-4">
+                    <Cloud className="w-12 h-12 text-emerald-500 animate-pulse" />
+                    <h3 className="text-lg font-bold">Identifikimi në Google Cloud</h3>
+                    <p className="text-xs text-zinc-500 leading-relaxed">
+                       Hyni me Email ose llogarinë Google për të ngarkuar dhe sinkronizuar të gjitha të dhënat tuaja në mjedisin e sigurt Cloud.
+                    </p>
+                    
+                    <div className="w-full space-y-3 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-500/5 text-left">
+                       <div>
+                          <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                             Adresa Email
+                          </label>
+                          <input
+                             type="email"
+                             placeholder="emri@shembull.com"
+                             value={email}
+                             onChange={(e) => setEmail(e.target.value)}
+                             className={`w-full px-3 py-2 rounded-lg border text-xs outline-none focus:border-accent-500 transition-colors ${
+                                isDark ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-300 text-zinc-900"
+                             }`}
+                          />
+                       </div>
+                       <div>
+                          <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                             Fjalëkalimi
+                          </label>
+                          <input
+                             type="password"
+                             placeholder="••••••••"
+                             value={password}
+                             onChange={(e) => setPassword(e.target.value)}
+                             className={`w-full px-3 py-2 rounded-lg border text-xs outline-none focus:border-accent-500 transition-colors ${
+                                isDark ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-300 text-zinc-900"
+                             }`}
+                          />
+                       </div>
+                       {authError && (
+                          <p className="text-[10px] text-red-500 font-bold bg-red-500/10 p-2 rounded">
+                             {authError.message}
+                          </p>
+                       )}
+                       <div className="flex gap-2">
+                          <button
+                             onClick={async () => {
+                                try {
+                                   await hookEmailLogin(email, password);
+                                   showToast("U kyçët me sukses!");
+                                } catch (e: any) {
+                                   setAuthError({ code: 'login-failed', message: e.message, provider: 'email' });
+                                }
+                             }}
+                             className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors"
+                          >
+                             Hyr
+                          </button>
+                          <button
+                             onClick={async () => {
+                                try {
+                                   await hookEmailRegister(email, password);
+                                   showToast("U regjistruat dhe u kyçët me sukses!");
+                                } catch (e: any) {
+                                   setAuthError({ code: 'register-failed', message: e.message, provider: 'email' });
+                                }
+                             }}
+                             className="flex-1 py-2 bg-zinc-600 hover:bg-zinc-500 text-white text-xs font-bold rounded-lg transition-colors border dark:border-zinc-700"
+                          >
+                             Regjistrohu
+                          </button>
+                       </div>
+                       <div className="relative flex py-1 items-center">
+                          <div className="flex-grow border-t border-zinc-200 dark:border-zinc-800"></div>
+                          <span className="flex-shrink mx-2 text-[9px] text-zinc-400 uppercase font-bold">ose vazhdo me</span>
+                          <div className="flex-grow border-t border-zinc-200 dark:border-zinc-800"></div>
+                       </div>
+                       <button
+                          onClick={async () => {
+                             try {
+                                await hookGoogleLogin();
+                                showToast("U kyçët me sukses me Google!");
+                             } catch (e: any) {
+                                showToast("Gabim gjatë kyçjes me Google.");
+                             }
+                          }}
+                          className="w-full py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                       >
+                          Google Sign-In
+                       </button>
+                    </div>
+                 </div>
+              ) : (
                  <React.Fragment>
+                    {onlineDashboardTab === 'lists' ? (
+                       <React.Fragment>
               {/* LEFT SIDEBAR (ONLINE DOCUMENTS LIST) */}
               <div className={`w-full md:w-80 border-b md:border-b-0 md:border-r flex flex-col shrink-0 overflow-hidden ${isDark ? "border-zinc-800 bg-zinc-950/20" : "border-zinc-200 bg-zinc-50/40"}`}>
                  {/* Search Box */}
@@ -4588,6 +4799,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                        )}
                     </div>
                  </div>
+              )}
+              </React.Fragment>
               )}
            </div>
         </div>
@@ -6872,6 +7085,20 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                         </div>
 
                         <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
+                        <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-accent-500 flex items-center gap-1.5">
+                           <Database className="w-4 h-4" /> {t('Backup i Sigurisë (Hapësira)', 'Security Backup')}
+                        </h4>
+                        <button 
+                           onClick={() => {
+                              setShowOptionsMenu(false);
+                              setBackupModal(true);
+                           }} 
+                           className="flex items-center gap-3 px-4 py-3 text-sm text-left font-bold transition-colors hover:bg-accent-500 hover:text-white text-accent-500 w-full"
+                        >
+                            <Database className="w-4 h-4 shrink-0" /> {t('Mjetet e Backup & Sinkronizimit', 'Backup & Sync Tools')}
+                        </button>
+
+                        <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
                        <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-blue-500">{t('Sistemi & Riparime', 'System & Fixes')}</h4>
                        <button onClick={handleDeleteEmptyDocs} className={`flex items-center gap-3 px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-blue-600 hover:text-white`}>
                            <Trash2 className="w-4 h-4 shrink-0" /> {t('Fshi Dokumentet Bosh', 'Delete Empty Documents')}
@@ -6928,7 +7155,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                               <Cloud className="w-3.5 h-3.5 text-emerald-500 shrink-0" /> CLOUD
                            </button>
                            <button 
-                             onClick={() => { setShowCloudDropdown(false); viewGistContent(); }} 
+                             onClick={() => { setShowCloudDropdown(false); openGistDashboard(); }} 
                              className="flex items-center gap-2 px-3.5 py-2 text-xs font-bold text-left hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors w-full"
                            >
                               <Github className="w-3.5 h-3.5 text-blue-500 shrink-0" /> GIST
@@ -6945,11 +7172,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                   )}
                </div>
 
-               <button onClick={() => setBackupModal(true)} className={`flex-shrink-0 snap-start flex justify-center items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg transition-colors border active:scale-95 ${
-                 isDark ? "bg-accent-600 hover:bg-accent-500 text-white shadow-md border-transparent" : "bg-accent-500 hover:bg-accent-600 text-white shadow-md font-bold border-transparent"
-               }`}>
-                 <Database className="w-3.5 h-3.5" /> Backup
-               </button>
+
 
                <button onClick={() => setAiChatModal(true)} className={`flex-shrink-0 snap-start flex justify-center items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg transition-colors border active:scale-95 ${
                  isDark ? "bg-purple-600 hover:bg-purple-500 text-white shadow-md border-transparent" : "bg-purple-500 hover:bg-purple-600 text-white shadow-md font-bold border-transparent"
