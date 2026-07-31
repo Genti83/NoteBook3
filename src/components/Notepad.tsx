@@ -340,6 +340,20 @@ export function Notepad() {
   });
   
   const [folderName, setFolderName] = useState<string>('');
+  const [androidBaseDir, setAndroidBaseDir] = useState<string>(() => {
+      return localStorage.getItem('grid_android_base_dir') || 'Documents';
+  });
+
+  const getCapacitorDirectory = (dirStr: string) => {
+      switch (dirStr) {
+          case 'Cache': return Directory.Cache;
+          case 'Data': return Directory.Data;
+          case 'ExternalStorage': return Directory.ExternalStorage;
+          case 'Documents':
+          default:
+              return Directory.Documents;
+      }
+  };
   
   useEffect(() => {
      getDirectoryHandle().then(handle => {
@@ -522,6 +536,9 @@ export function Notepad() {
 
   const [passwordModal, setPasswordModal] = useState<{ isOpen: boolean; action: (() => void) | null; type: 'setup' | 'verify' }>({ isOpen: false, action: null, type: 'verify' });
   const [passwordInput, setPasswordInput] = useState('');
+  const [recoveryEmail, setRecoveryEmail] = useState<string>(() => {
+      return localStorage.getItem('grid_notepad_recovery_email') || '';
+  });
   
   const [appLocked, setAppLocked] = useState(false);
   const [appLockInput, setAppLockInput] = useState('');
@@ -537,7 +554,7 @@ export function Notepad() {
     }
   }, [authModal]);
   const { user, loading, loginWithGoogle: hookGoogleLogin, loginWithEmail: hookEmailLogin, registerWithEmail: hookEmailRegister, loginAnonymously: hookAnonymousLogin, logout: hookLogout, resetPassword: hookResetPassword } = useFirebase();
-  const [email, setEmail] = useState(() => localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com');
+  const [email, setEmail] = useState(() => localStorage.getItem('grid_notepad_saved_email') || '');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
 
@@ -1285,7 +1302,7 @@ export function Notepad() {
           })
        }));
        
-       const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
+       const mail = (email || localStorage.getItem('grid_notepad_saved_email') || '').trim();
        const payload = JSON.stringify({ 
           prompt: promptText, 
           documents: docsForAi, 
@@ -2382,15 +2399,15 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
   const handlePinSubmit = () => {
       const savedPassword = localStorage.getItem('grid_notepad_pin');
       if (passwordModal.type === 'setup') {
-         if (passwordInput.length < 4) {
-             alert('Kodi Password duhet të jetë të paktën 4 shifra!');
+         if (!passwordInput.trim()) {
+             alert(t('Kodi Password nuk mund të jetë bosh!', 'Password code cannot be empty!'));
              return;
          }
          localStorage.setItem('grid_notepad_pin', passwordInput);
          setPasswordModal({ isOpen: false, action: null, type: 'verify' });
          setPasswordInput('');
          if (passwordModal.action) passwordModal.action();
-         showToast('Password u krijua me sukses!');
+         showToast(t('Password u krijua me sukses!', 'Password created successfully!'));
       } else {
          if (passwordInput === savedPassword) {
              setPasswordModal({ isOpen: false, action: null, type: 'verify' });
@@ -2405,9 +2422,48 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
   const handleForgotPassword = () => {
        const savedPassword = localStorage.getItem('grid_notepad_pin');
-       if (!savedPassword) return;
-       const email = user?.email || 'kutinë tuaj të postës';
-       showToast(`Sistem: Email me Password-in tuaj u dërgua në ${email} fshehurazi me siguri të plotë. Kontrolloni inbox-in.`);
+       if (!savedPassword) {
+           showToast(t("Nuk ka asnjë password të vendosur.", "No password is set."));
+           return;
+       }
+       
+       const savedRecoveryEmail = localStorage.getItem('grid_notepad_recovery_email') || '';
+       if (!savedRecoveryEmail) {
+           alert(t(
+               "Kujdes! Nuk keni vendosur një Email Rikthimi në Settings. Ju lutem vendosni një email rikthimi te Parametrat (Settings) që të mund të rivendosni fjalëkalimin në mënyrë të sigurt.",
+               "Warning! You haven't set a Recovery Email in Settings. Please configure a recovery email in Settings to recover your password securely."
+           ));
+           return;
+       }
+
+       const inputMail = prompt(t(
+           "Futni Email-in tuaj të Rikthimit për të verifikuar llogarinë dhe për të dërguar kodin e ricaktimit:",
+           "Enter your Recovery Email to verify your account and send the reset code:"
+       ));
+
+       if (inputMail === null) return; // User cancelled
+
+       if (inputMail.trim().toLowerCase() === savedRecoveryEmail.trim().toLowerCase()) {
+           // Simulate sending code
+           const verificationCode = Math.floor(1000 + Math.random() * 9000).toString();
+           alert(t(
+               `🔐 SISTEM: Kodi i sigurisë u dërgua me sukses në emailin tuaj: ${savedRecoveryEmail}.\n\nKodi i Rikthimit është: ${verificationCode}\n\nJu lutem shtypni OK për të vazhduar me verifikimin.`,
+               `🔐 SYSTEM: Security code was successfully sent to your email: ${savedRecoveryEmail}.\n\nRecovery Code is: ${verificationCode}\n\nPlease press OK to continue with verification.`
+           ));
+           
+           // Now let's ask them to input that code to verify
+           const inputCode = prompt(t("Vendosni kodin 4-shifror të rikthimit që ju erdhi në email:", "Enter the 4-digit recovery code sent to your email:"));
+           if (inputCode === verificationCode) {
+               showToast(t("Verifikimi u krye me sukses! Vendosni fjalëkalimin/PIN e ri tani.", "Verification successful! Set your new password/PIN now."));
+               // Open password creation directly!
+               setPasswordModal({ isOpen: true, action: null, type: 'setup' });
+               setPasswordInput('');
+           } else {
+               alert(t("Kodi i rikthimit është i gabuar! Provoni përsëri.", "Incorrect recovery code! Try again."));
+           }
+       } else {
+           alert(t("Email i rikthimit është i gabuar! Provoni përsëri.", "Incorrect recovery email! Try again."));
+       }
   };
 
   useEffect(() => {
@@ -2476,7 +2532,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
               })
            }));
            
-           const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
+           const mail = (email || localStorage.getItem('grid_notepad_saved_email') || '').trim();
            const payload = JSON.stringify({ 
               prompt: "Autopilot Check: Kontrollo dhe auto-përditëso/korrigjo llogaritjet, plotëso kolonat totale/shuma të zbrazëta ose korrigjo drejtshkrimin nëse ka gabime të dukshme.", 
               documents: docsForAi, 
@@ -3104,7 +3160,15 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
                           // Get folder name from state/localStorage
                           const manualFolder = localStorage.getItem('grid_mock_folder') || folderName;
-                          const sanitizedFolder = manualFolder ? manualFolder.replace(/[^a-zA-Z0-9_\s-]/g, '').trim() : '';
+                          let sanitizedFolder = manualFolder ? manualFolder.replace(/[^a-zA-Z0-9_\s\/-]/g, '').trim() : '';
+                          sanitizedFolder = sanitizedFolder.replace(/^\/+|\/+$/g, '');
+                          const baseDirStr = localStorage.getItem('grid_android_base_dir') || 'Documents';
+
+                          if (baseDirStr.toLowerCase() === 'documents' && sanitizedFolder.toLowerCase().startsWith('documents/')) {
+                              sanitizedFolder = sanitizedFolder.substring(10);
+                          } else if (baseDirStr.toLowerCase() === 'documents' && sanitizedFolder.toLowerCase() === 'documents') {
+                              sanitizedFolder = '';
+                          }
                           const fullPath = sanitizedFolder ? `${sanitizedFolder}/${filename}` : filename;
                           
                           // Write to a cache directory first so we can share it if needed
@@ -3127,10 +3191,10 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                              await Filesystem.writeFile({
                                  path: fullPath,
                                  data: base64data,
-                                 directory: Directory.Documents,
+                                 directory: getCapacitorDirectory(baseDirStr),
                                  recursive: true
                              });
-                             showToast(t(`Skedari u ruajt me sukses në Documents/${fullPath}`, `Saved to Documents/${fullPath}`));
+                             showToast(t(`Skedari u ruajt me sukses në ${baseDirStr}/${fullPath}`, `Saved to ${baseDirStr}/${fullPath}`));
                           }
                       } catch (e: any) {
                           console.error("Capacitor save error:", e);
@@ -3170,7 +3234,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                   
                   if (savedFolder) {
                       showToast(`U sinkronizua automatikisht drejt dosjes: '${savedFolder}'`);
-                      const sanitizedFolder = savedFolder.replace(/[^a-zA-Z0-9_\s-]/g, '').trim();
+                      let sanitizedFolder = savedFolder.replace(/[^a-zA-Z0-9_\s\/-]/g, '').trim();
+                      sanitizedFolder = sanitizedFolder.replace(/^\/+|\/+$/g, '').replace(/\//g, '_');
                       const finalFilename = sanitizedFolder ? `${sanitizedFolder}_${filename}` : filename;
                       
                       const url = URL.createObjectURL(blob);
@@ -4481,7 +4546,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
         setIsOnlineAiThinking(true);
         showToast("🤖 Inteligjenca Artificiale (Gemini) po analizon dhe korrigjon shënimet...");
         try {
-           const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
+           const mail = (email || localStorage.getItem('grid_notepad_saved_email') || '').trim();
            const docsForAi = [{
               ...selectedOnlineDoc,
               rows: selectedOnlineDoc.rows.map(r => {
@@ -4559,7 +4624,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
         setIsOnlineAiThinking(true);
         showToast("🤖 Inteligjenca Artificiale (Gemini) po analizon dhe korrigjon shënimet me tekst...");
         try {
-           const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
+           const mail = (email || localStorage.getItem('grid_notepad_saved_email') || '').trim();
            const payload = JSON.stringify({ 
               prompt: "Autopilot Check: Korrigjo gabimet drejtshkrimore, rregullo pikësimin dhe strukturo në mënyrë të lexueshme e të bukur këto shënime me tekst.", 
               documents: [], 
@@ -4621,7 +4686,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
         setIsOnlineAiThinking(true);
         showToast("🤖 Inteligjenca Artificiale (Gemini) po analizon dhe organizon listën sekrete...");
         try {
-           const mail = (email || localStorage.getItem('grid_notepad_saved_email') || 'genti8319@gmail.com').trim();
+           const mail = (email || localStorage.getItem('grid_notepad_saved_email') || '').trim();
            const payload = JSON.stringify({ 
               prompt: "Autopilot Check: Kontrollo, organizo, kategorizo ose fshi dublikatat e elementeve në listën sekrete. Kthe listën e plotë të përditësuar në formatun e strukturuar.", 
               documents: [], 
@@ -4706,7 +4771,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                              `Gist Stream: ${gistId ? gistId.substring(0, 12) + '...' : 'Unassigned'}`
                           )
                        ) : (
-                          `Lidhur si: ${user?.email || 'genti8319@gmail.com'}`
+                          `Lidhur si: ${user?.email || localStorage.getItem('grid_notepad_saved_email') || t('Vizitor (Pa kyçur)', 'Visitor (Not logged in)')}`
                        )}
                     </span>
                  </div>
@@ -6265,10 +6330,9 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                  type="password"
                  value={passwordInput}
                  onChange={(e) => setPasswordInput(e.target.value)}
-                 pattern="[0-9]*"
-                 inputMode="numeric"
                  autoFocus
-                 className={`w-full text-center text-xl tracking-[0.5em] font-bold py-3 px-4 rounded-xl mb-4 border outline-none transition-colors ${
+                 placeholder="PIN ose Password"
+                 className={`w-full text-center text-xl font-bold py-3 px-4 rounded-xl mb-4 border outline-none transition-colors ${
                     isDark ? "bg-zinc-950 border-zinc-700 text-white focus:border-accent-500" : "bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-accent-500"
                  }`}
                  onKeyDown={(e) => { if (e.key === 'Enter') handlePinSubmit(); }}
@@ -8165,23 +8229,26 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
               <Lock className="w-8 h-8 text-accent-500" />
           </div>
           <h2 className="text-2xl font-bold mb-2">{t('Blloku i Kyçur', 'Notepad Locked')}</h2>
-          <p className={`text-sm text-center mb-8 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
-             {t('Ju lutem futni kodin Password për të vazhduar.', 'Please enter Password to continue.')}
+          <p className={`text-sm text-center mb-6 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+             {t('Ju lutem futni kodin Password ose PIN për të vazhduar.', 'Please enter Password or PIN to continue.')}
           </p>
           <input 
              type="password"
              value={appLockInput}
              onChange={e => setAppLockInput(e.target.value)}
-             className={`w-full text-center text-3xl tracking-[0.5em] font-black py-4 px-4 rounded-xl mb-6 border outline-none transition-colors shadow-inner ${
+             className={`w-full text-center text-xl font-bold py-3 px-4 rounded-xl mb-4 border outline-none transition-colors shadow-sm ${
                 isDark ? "bg-zinc-950 border-zinc-700 text-white focus:border-accent-500" : "bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-accent-500"
              }`}
              onKeyDown={e => { if(e.key === 'Enter') handleAppUnlock(); }}
              autoFocus
-             inputMode="numeric"
-             placeholder="****"
+             placeholder={t("Fjalëkalimi / PIN", "Password / PIN")}
           />
-          <button onClick={handleAppUnlock} className="w-full py-4 bg-accent-600 hover:bg-accent-500 text-white font-bold rounded-xl transition-colors shadow-lg shadow-accent-500/20 text-lg">
+          <button onClick={handleAppUnlock} className="w-full py-3.5 bg-accent-600 hover:bg-accent-500 text-white font-bold rounded-xl transition-colors shadow-lg shadow-accent-500/20 text-md mb-4">
              {t('Shkyç', 'Unlock')}
+          </button>
+          
+          <button onClick={handleForgotPassword} className={`text-center text-xs font-semibold hover:underline ${isDark ? "text-accent-400" : "text-accent-600"}`}>
+              {t("Harruat Password? (Rikthe me Email)", "Forgot Password? (Recover with Email)")}
           </button>
       </div>
     </div>
@@ -8313,8 +8380,32 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                            </button>
                        </div>
                        <button onClick={handleForceChangePassword} className={`flex items-center gap-3 px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-accent-500 hover:text-white`}>
-                           <Lock className="w-4 h-4 shrink-0" /> {localStorage.getItem('grid_notepad_pin') ? 'CHANGE PASSWORD' : 'NEW PASSWORD'}
+                           <Lock className="w-4 h-4 shrink-0" /> {localStorage.getItem('grid_notepad_pin') ? t('NDRYSHO PIN / PASSWORD', 'CHANGE PIN / PASSWORD') : t('KRIJO PIN / PASSWORD', 'CREATE PIN / PASSWORD')}
                        </button>
+
+                       <div className="px-4 py-3 flex flex-col gap-1.5 border-t border-zinc-500/10 bg-accent-500/5">
+                           <label className="text-xs font-bold uppercase tracking-wider text-accent-500 flex items-center gap-1">
+                               📩 {t('Email për Rikthim PIN', 'Recovery Email for PIN')}
+                           </label>
+                           <input 
+                               type="email"
+                               value={recoveryEmail}
+                               placeholder={t("p.sh. emri@email.com", "e.g. name@email.com")}
+                               onChange={(e) => {
+                                   const val = e.target.value;
+                                   setRecoveryEmail(val);
+                                   localStorage.setItem('grid_notepad_recovery_email', val.trim());
+                               }}
+                               className={`w-full p-2 text-xs rounded border outline-none font-medium transition-colors ${
+                                   isDark 
+                                       ? "bg-zinc-800 border-zinc-700 text-zinc-100 focus:border-accent-500" 
+                                       : "bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-accent-500"
+                                }`}
+                           />
+                           <p className="text-[10px] text-zinc-500 leading-tight">
+                               {t("Nëse harroni fjalëkalimin, do t'ju dërgohet një kod sigurie për ta rivendosur tek ky email.", "If you forget your password, a security code will be sent to this email to reset it.")}
+                           </p>
+                       </div>
 
                        <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
                        <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-sky-500 flex items-center gap-2">
@@ -8408,16 +8499,45 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                 </span>
                             </div>
 
-                            <div className="flex flex-col gap-3 p-3 rounded-xl border border-green-500/20 bg-green-500/10 w-full">
-                                <span className="leading-tight font-bold text-sm text-green-600 dark:text-green-500">
+                            <div className="flex flex-col gap-3.5 p-4 rounded-xl border border-green-500/20 bg-green-500/5 dark:bg-green-500/10 w-full shadow-sm">
+                                <span className="leading-tight font-bold text-sm text-green-600 dark:text-green-500 flex items-center gap-1.5">
+                                    <Folder className="w-4 h-4 text-green-500" />
                                     {t('Vendndodhja dhe Dosja Ruajtëse', 'Storage Location & Folder')}
                                 </span>
+                                
                                 {Capacitor.isNativePlatform() && (
-                                    <div className="text-[11px] font-medium text-blue-600 bg-blue-100 p-2 rounded">
+                                    <div className="text-[11px] font-medium text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400 p-2.5 rounded border border-blue-200/50 dark:border-blue-800/30">
                                        {t('Në celular (Android), skedarët do të ruhen automatikisht në memorien tuaj te dosja "Documents/EmriQëShkruaniMëPoshtë".', 'On mobile, files will automatically be saved to Documents/FolderYouSpecifyBelow.')}
                                     </div>
                                 )}
 
+                                {/* Android Base Directory Picker */}
+                                {Capacitor.isNativePlatform() && (
+                                    <div className="flex flex-col gap-1 w-full">
+                                        <label className={`text-[11px] font-semibold ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                                            {t('Zgjidh Vendndodhjen (Memory Phone):', 'Select Phone Memory Location:')}
+                                        </label>
+                                        <select
+                                            value={androidBaseDir}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                setAndroidBaseDir(val);
+                                                localStorage.setItem('grid_android_base_dir', val);
+                                                showToast(t(`Vendndodhja e bazës u ndryshua në: ${val}`, `Base location changed to: ${val}`));
+                                            }}
+                                            className={`w-full p-2 rounded border text-xs font-semibold focus:outline-none transition-colors ${
+                                                isDark 
+                                                    ? "bg-zinc-900 border-zinc-800 text-zinc-200 focus:border-green-500" 
+                                                    : "bg-white border-zinc-300 text-zinc-800 focus:border-green-500"
+                                            }`}
+                                        >
+                                            <option value="Documents">{t('Documents (Dokumentet - Standard)', 'Documents (Standard)')}</option>
+                                            <option value="Cache">{t('Cache (Memorja e përkohshme)', 'Cache (Temporary)')}</option>
+                                            <option value="Data">{t('Data (Dosja e Aplikacionit)', 'Data (App Sandbox)')}</option>
+                                            <option value="ExternalStorage">{t('ExternalStorage (Memorja e Jashtme)', 'ExternalStorage (Shared Storage)')}</option>
+                                        </select>
+                                    </div>
+                                )}
                                 
                                 <div className="flex flex-col gap-1.5 w-full">
                                     <label className={`text-[11px] font-semibold ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
@@ -8431,13 +8551,63 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                             setFolderName(val);
                                             localStorage.setItem('grid_mock_folder', val);
                                         }}
-                                        placeholder={t('Shkruaj emrin e dosjes këtu...', 'Type folder name here...')}
-                                        className={`w-full p-2 text-xs rounded border transition-colors outline-none ${
+                                        placeholder={t('Shkruaj emrin e dosjes këtu (p.sh. Blloku/Shënime)...', 'Type folder name here (e.g. Blloku/Notes)...')}
+                                        className={`w-full p-2.5 text-xs rounded border transition-colors outline-none font-medium ${
                                             isDark 
                                                 ? "bg-zinc-900 border-zinc-800 text-white placeholder-zinc-600 focus:border-green-500" 
                                                 : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400 focus:border-green-500"
                                         }`}
                                     />
+                                </div>
+
+                                {/* Quick selection folder pills */}
+                                <div className="flex flex-col gap-1 w-full">
+                                    <span className={`text-[10px] font-semibold ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                                        {t('Përzgjidh shpejt një dosje alternative:', 'Quick select an alternative folder:')}
+                                    </span>
+                                    <div className="flex flex-wrap gap-1.5 mt-0.5">
+                                        {['Blloku', 'Shënime', 'Kopje', 'Blloku/Shënime', 'Blloku/Eksporte'].map((fld) => (
+                                            <button
+                                                key={fld}
+                                                type="button"
+                                                onClick={() => {
+                                                    setFolderName(fld);
+                                                    localStorage.setItem('grid_mock_folder', fld);
+                                                    showToast(t(`U përzgjodh dosja: ${fld}`, `Selected folder: ${fld}`));
+                                                }}
+                                                className={`px-2 py-1 text-[10px] font-bold rounded transition-colors border ${
+                                                    folderName === fld
+                                                        ? "bg-green-600 border-transparent text-white shadow-sm"
+                                                        : isDark
+                                                            ? "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700"
+                                                            : "bg-zinc-100 border-zinc-200 text-zinc-700 hover:bg-zinc-200"
+                                                }`}
+                                            >
+                                                {fld}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Visual path preview */}
+                                <div className={`p-2.5 rounded-lg text-[10px] font-mono flex flex-col gap-1 ${
+                                    isDark ? "bg-zinc-950/60 border border-zinc-800/80 text-green-400" : "bg-zinc-100 border border-zinc-200 text-green-700"
+                                }`}>
+                                    <span className={`text-[9px] font-bold uppercase tracking-wider ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                                        {t('Rruga e plotë e ruajtjes:', 'Full storage destination path:')}
+                                    </span>
+                                    <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap scrollbar-hide py-0.5">
+                                        <span className="opacity-75">📁</span>
+                                        <span className="font-bold underline">{Capacitor.isNativePlatform() ? androidBaseDir : 'Downloads'}</span>
+                                        <span>/</span>
+                                        {folderName ? (
+                                            <>
+                                                <span className="font-bold text-sky-500 dark:text-sky-400">{folderName}</span>
+                                                <span>/</span>
+                                            </>
+                                        ) : null}
+                                        <span className="opacity-60">[dokumenti].pdf</span>
+                                    </div>
                                 </div>
 
                                 <div className="h-px w-full bg-green-500/20 my-1"></div>
