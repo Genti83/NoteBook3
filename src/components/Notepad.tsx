@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getDirectoryHandle, saveDirectoryHandle } from '../lib/directoryFS';
-import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen, Terminal, Copy, CheckCheck, Folder, User, Key, AlertTriangle, ArrowLeft, Edit, LayoutGrid, List } from 'lucide-react';
+import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen, Terminal, Copy, CheckCheck, Folder, User, Key, AlertTriangle, ArrowLeft, Edit, LayoutGrid, List, Smartphone, HardDrive, Menu, MoreVertical, ChevronRight, Info } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { useFirebase } from '../hooks/useFirebase';
@@ -344,6 +344,58 @@ export function Notepad() {
       return localStorage.getItem('grid_android_base_dir') || 'Documents';
   });
 
+  // Storage Picker states for the SAF File Explorer
+  const [showStoragePickerModal, setShowStoragePickerModal] = useState<boolean>(false);
+  const [activeProvider, setActiveProvider] = useState<string>('M35 e GE');
+  const [currentPath, setCurrentPath] = useState<string[]>([]);
+  const [storageSearchQuery, setStorageSearchQuery] = useState<string>('');
+  const [showStorageSidebar, setShowStorageSidebar] = useState<boolean>(false);
+
+  const [simulatedFilesystem, setSimulatedFilesystem] = useState<Record<string, { name: string; type: 'folder' | 'file'; size?: string; date?: string; }[]>>(() => {
+      const saved = localStorage.getItem('grid_simulated_fs');
+      if (saved) {
+          try { return JSON.parse(saved); } catch(e) {}
+      }
+      return {
+          'M35 e GE': [
+              { name: '.aide', type: 'folder' },
+              { name: '.sketchware', type: 'folder' },
+              { name: '.wallpaper', type: 'folder' },
+              { name: '1 MUSIC-GU player', type: 'folder' },
+              { name: 'A DELTIO APOSTOLIS', type: 'folder' },
+              { name: 'DOKUMENTET', type: 'folder' },
+              { name: 'Blloku', type: 'folder' },
+              { name: 'Shënime', type: 'folder' }
+          ],
+          'M35 e GE/DOKUMENTET': [
+              { name: '2025 Elga', type: 'folder' },
+              { name: 'BLLOKU SHENIMEVE', type: 'folder' },
+              { name: 'OAED', type: 'folder' },
+              { name: 'PAGESA 2024 TOKAT', type: 'folder' },
+              { name: 'QERA SHTEPIE', type: 'folder' },
+              { name: 'ZETORI FIAT SERVIS', type: 'folder' },
+              { name: '238029411.txt', type: 'file', size: '9 B', date: '10 Apr 2024' },
+              { name: '3 7 8 12.txt', type: 'file', size: '39 B', date: '2 Jun 2024' }
+          ],
+          'M35 e GE/DOKUMENTET/BLLOKU SHENIMEVE': [
+              { name: 'shenimet_e_mia.txt', type: 'file', size: '1.2 KB', date: '25 Jul 2026' }
+          ],
+          'SD card': [
+              { name: 'DCIM', type: 'folder' },
+              { name: 'Music', type: 'folder' },
+              { name: 'Android', type: 'folder' }
+          ],
+          'Termux': [
+              { name: 'home', type: 'folder' },
+              { name: 'usr', type: 'folder' }
+          ]
+      };
+  });
+
+  useEffect(() => {
+      localStorage.setItem('grid_simulated_fs', JSON.stringify(simulatedFilesystem));
+  }, [simulatedFilesystem]);
+
   const getCapacitorDirectory = (dirStr: string) => {
       switch (dirStr) {
           case 'Cache': return Directory.Cache;
@@ -540,6 +592,9 @@ export function Notepad() {
       return localStorage.getItem('grid_notepad_recovery_email') || '';
   });
   
+  const [activeSecretId, setActiveSecretId] = useState<string | null>(null);
+  const [secretSearchQuery, setSecretSearchQuery] = useState('');
+  
   const [appLocked, setAppLocked] = useState(false);
   const [appLockInput, setAppLockInput] = useState('');
 
@@ -672,8 +727,12 @@ export function Notepad() {
           mdContent += `## 🔒 LISTA E SEKRETEVE (SECRETS)\n\n`;
           if (finalSecretList && finalSecretList.length > 0) {
              finalSecretList.forEach((secretItem, idx) => {
-                const check = secretItem.done ? '[x]' : '[ ]';
-                mdContent += `- ${check} ${secretItem.text || 'Element i paemërtuar'}\n`;
+                if (secretItem.name !== undefined) {
+                   mdContent += `### 📁 ${secretItem.name}\n${secretItem.content || '*Bllok i zbrazët*'}\n\n`;
+                } else {
+                   const check = secretItem.done ? '[x]' : '[ ]';
+                   mdContent += `- ${check} ${secretItem.text || 'Element i paemërtuar'}\n`;
+                }
              });
           } else {
              mdContent += `*Nuk ka sekrete në listë.*\n\n`;
@@ -970,13 +1029,29 @@ export function Notepad() {
 
         cloudSecretList.forEach(cItem => {
            if (!localSecretMap.has(cItem.id)) {
-              mergedSecretList.push(cItem);
+              const hasContent = cItem.content !== undefined;
+              mergedSecretList.push({
+                 id: cItem.id,
+                 name: cItem.name || cItem.text || t('Pa Emër', 'Unnamed'),
+                 content: hasContent ? cItem.content : (cItem.note || ''),
+                 text: cItem.name || cItem.text || t('Pa Emër', 'Unnamed'),
+                 done: !!cItem.done,
+                 createdAt: cItem.createdAt || new Date().toISOString(),
+                 updatedAt: cItem.updatedAt || new Date().toISOString()
+              });
            } else {
               const localItem = localSecretMap.get(cItem.id);
               if (localItem) {
                  localItem.done = localItem.done || cItem.done;
-                 if (cItem.text && !localItem.text) {
-                    localItem.text = cItem.text;
+                 const cloudUpdate = cItem.updatedAt ? new Date(cItem.updatedAt).getTime() : 0;
+                 const localUpdate = localItem.updatedAt ? new Date(localItem.updatedAt).getTime() : 0;
+                 if (cloudUpdate > localUpdate || (!localItem.content && cItem.content)) {
+                    localItem.name = cItem.name || cItem.text || localItem.name;
+                    localItem.content = cItem.content !== undefined ? cItem.content : (cItem.note || localItem.content);
+                    localItem.text = localItem.name;
+                    if (cItem.updatedAt) {
+                       localItem.updatedAt = cItem.updatedAt;
+                    }
                  }
               }
            }
@@ -1737,124 +1812,204 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       }
   };
 
-     const handleCreateSecretListItem = () => {
-      const newItem = { id: Date.now().toString(), text: '', note: '', done: false };
+   const handleCreateSecretListItem = (name?: string) => {
+      const finalName = name && name.trim() ? name.trim() : `${t('Bllok i Ri', 'New Block')} ${secretList.length + 1}`;
+      const newItem = {
+         id: Date.now().toString(),
+         name: finalName,
+         content: '',
+         text: finalName, // backward compatibility
+         done: false,
+         createdAt: new Date().toISOString(),
+         updatedAt: new Date().toISOString()
+      };
       const updated = [...secretList, newItem];
       setSecretList(updated);
       localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
-      showToast("U krijua një element i ri!");
+      setActiveSecretId(newItem.id);
+      showToast(t(`U krijua blloku sekret: "${finalName}"`, `Created secret block: "${finalName}"`));
    };
 
-  const handleCreateSecretEditorNote = () => {
-     const dateStr = format(new Date(), 'yyyy-MM-dd HH:mm');
-     const newNotePrompt = (blueText ? "\n\n" : "") + `--- Shënim i Ri (${dateStr}) ---\n`;
-     const updated = blueText + newNotePrompt;
-     setBlueText(updated);
-     localStorage.setItem('grid_notepad_blue', updated);
-     showToast("U shtua një seksion i ri shënimesh!");
-  };
+   const handleCreateSecretEditorNote = () => {
+      handleCreateSecretListItem(t('Hartim i Ri', 'New Draft'));
+   };
 
-  const handleSaveSecrets = async () => {
-     localStorage.setItem('grid_notepad_blue', blueText);
-     localStorage.setItem('grid_notepad_secret_list', JSON.stringify(secretList));
-     if (auth.currentUser && navigator.onLine) {
-        const blueRef = doc(db, 'settings', getActiveUid()!);
-        await setDoc(blueRef, { 
-            blueText, 
-            secretList,
-            userId: getActiveUid()!, 
-            pin: localStorage.getItem('grid_notepad_pin') || null 
-        }, { merge: true });
-        showToast("🔒 Shënimet sekrete u ruajtën me sukses në Cloud!");
-     } else {
-        showToast("🔒 Shënimet sekrete u ruajtën lokalisht me sukses!");
-     }
-  };
+   const handleSaveSecrets = async () => {
+      localStorage.setItem('grid_notepad_secret_list', JSON.stringify(secretList));
+      
+      // Also update blueText as a compilation to keep any systems expecting blueText synchronized
+      let compiledBlue = '';
+      if (secretList.length > 0) {
+         compiledBlue = secretList.map(item => `=== ${item.name || item.text || 'Pa Emër'} ===\n${item.content || ''}`).join('\n\n');
+      }
+      setBlueText(compiledBlue);
+      localStorage.setItem('grid_notepad_blue', compiledBlue);
 
-  const handleDeleteSecrets = () => {
-     if (secretActiveTab === 'list') {
-        const checkedCount = secretList.filter(i => i.done).length;
-        if (checkedCount > 0) {
-           const updated = secretList.filter(i => !i.done);
-           setSecretList(updated);
-           localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
-           showToast(`Fshihen ${checkedCount} elemente të përzgjedhur!`);
-        } else {
-           if (confirm("Dëshironi të fshini të gjithë listën e sekreteve?")) {
-              setSecretList([]);
-              localStorage.setItem('grid_notepad_secret_list', JSON.stringify([]));
-              showToast("U fshinë të gjitha!");
-           }
-        }
-     } else {
-        if (confirm("Dëshironi të pastroni plotësisht tekstin e shënimit sekret?")) {
-           setBlueText('');
-           localStorage.setItem('grid_notepad_blue', '');
-           showToast("U pastrua teksti!");
-        }
-     }
-  };
+      if (auth.currentUser && navigator.onLine) {
+         const blueRef = doc(db, 'settings', getActiveUid()!);
+         await setDoc(blueRef, { 
+             blueText: compiledBlue, 
+             secretList,
+             userId: getActiveUid()!, 
+             pin: localStorage.getItem('grid_notepad_pin') || null 
+         }, { merge: true });
+         showToast(t("🔒 Shënimet sekrete u ruajtën me sukses në Cloud!", "🔒 Secret notes successfully saved to Cloud!"));
+      } else {
+         showToast(t("🔒 Shënimet sekrete u ruajtën lokalisht me sukses!", "🔒 Secret notes successfully saved locally!"));
+      }
+   };
 
-  const handleSelectAllSecrets = () => {
-     if (secretActiveTab === 'list') {
-        if (secretList.length === 0) {
-           showToast("Lista është bosh!");
-           return;
-        }
-        const allDone = secretList.every(i => i.done);
-        const updated = secretList.map(i => ({ ...i, done: !allDone }));
-        setSecretList(updated);
-        localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
-        showToast(allDone ? "U çpërzgjodhën të gjitha!" : "U përzgjodhën të gjitha!");
-     } else {
-        showToast("Zgjedhja vlen vetëm për listën e sekreteve!");
-     }
-  };
+   const handleDeleteSecretItem = (idToDelete: string) => {
+      const itemToDelete = secretList.find(item => item.id === idToDelete);
+      const name = itemToDelete ? (itemToDelete.name || itemToDelete.text) : '';
+      if (confirm(t(`Dëshironi ta fshini bllokun sekret "${name}"?`, `Are you sure you want to delete secret block "${name}"?`))) {
+         const updated = secretList.filter(item => item.id !== idToDelete);
+         setSecretList(updated);
+         localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+         if (activeSecretId === idToDelete) {
+            setActiveSecretId(null);
+         }
+         showToast(t("Blloku sekret u fshi!", "Secret block was deleted!"));
+      }
+   };
 
-  const handleExportSecrets = () => {
-     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
-        blueText,
-        secretList
-     }, null, 2));
-     const downloadAnchor = document.createElement('a');
-     downloadAnchor.setAttribute("href", dataStr);
-     downloadAnchor.setAttribute("download", `bllok_sekrete_backup_${format(new Date(), 'yyyyMMdd_HHmmss')}.json`);
-     document.body.appendChild(downloadAnchor);
-     downloadAnchor.click();
-     downloadAnchor.remove();
-     showToast("Dosja e sekreteve u shkarkua me sukses!");
-  };
+   const handleDeleteSecrets = () => {
+      if (activeSecretId) {
+         handleDeleteSecretItem(activeSecretId);
+      } else {
+         if (confirm(t("Dëshironi të fshini të gjithë listën e sekreteve?", "Are you sure you want to delete all secret blocks?"))) {
+            setSecretList([]);
+            localStorage.setItem('grid_notepad_secret_list', JSON.stringify([]));
+            setActiveSecretId(null);
+            showToast(t("U fshinë të gjitha!", "All secret blocks deleted!"));
+         }
+      }
+   };
 
-  const handleImportSecretsClick = () => {
-     secretFileInputRef.current?.click();
-  };
+   const handleSelectAllSecrets = () => {
+      showToast(t("Veprimi nuk është i disponueshëm në strukturën e re.", "Action not available in the new structure."));
+   };
 
-  const handleImportSecretsFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-     const file = e.target.files?.[0];
-     if (!file) return;
-     const reader = new FileReader();
-     reader.onload = (event) => {
-        try {
-           const parsed = JSON.parse(event.target?.result as string);
-           if (parsed.blueText !== undefined) {
-              setBlueText(parsed.blueText);
-              localStorage.setItem('grid_notepad_blue', parsed.blueText);
-           }
-           if (parsed.secretList && Array.isArray(parsed.secretList)) {
-              setSecretList(parsed.secretList);
-              localStorage.setItem('grid_notepad_secret_list', JSON.stringify(parsed.secretList));
-           }
-           showToast("🔒 Të dhënat sekrete u importuan me sukses!");
-        } catch (err) {
-           const textContent = event.target?.result as string;
-           setBlueText(textContent);
-           localStorage.setItem('grid_notepad_blue', textContent);
-           setSecretActiveTab('editor');
-           showToast("🔒 U importua si tekst i thjeshtë në editor.");
-        }
-     };
-     reader.readAsText(file);
-  };
+   const handleExportActiveNoteAsTxt = (item: any) => {
+      if (!item) return;
+      const content = item.content || '';
+      const dataStr = "data:text/plain;charset=utf-8," + encodeURIComponent(content);
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `${(item.name || item.text || 'sekret').toLowerCase().replace(/\s+/g, '_')}_${format(new Date(), 'yyyyMMdd_HHmmss')}.txt`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showToast(t("Shënimi u shkarkua si skedar .txt!", "Note was downloaded as a .txt file!"));
+   };
+
+   const handleExportSecrets = () => {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
+         blueText,
+         secretList
+      }, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `bllok_sekrete_backup_${format(new Date(), 'yyyyMMdd_HHmmss')}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showToast(t("Dosja e plotë e sekreteve u shkarkua me sukses!", "Full secrets file downloaded successfully!"));
+   };
+
+   const handleImportSecretsClick = () => {
+      secretFileInputRef.current?.click();
+   };
+
+   const handleImportSecretsFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+         try {
+            const parsed = JSON.parse(event.target?.result as string);
+            let importedList: any[] = [];
+            
+            if (parsed.secretList && Array.isArray(parsed.secretList)) {
+               importedList = parsed.secretList.map((item: any) => ({
+                  id: item.id || Date.now().toString() + Math.random().toString(),
+                  name: item.name || item.text || t('I importuar', 'Imported'),
+                  content: item.content !== undefined ? item.content : (item.note || ''),
+                  text: item.name || item.text || t('I importuar', 'Imported'),
+                  done: !!item.done,
+                  createdAt: item.createdAt || new Date().toISOString(),
+                  updatedAt: item.updatedAt || new Date().toISOString()
+               }));
+            } else if (Array.isArray(parsed)) {
+               importedList = parsed.map((item: any) => ({
+                  id: item.id || Date.now().toString() + Math.random().toString(),
+                  name: item.name || item.text || t('I importuar', 'Imported'),
+                  content: item.content !== undefined ? item.content : (item.note || ''),
+                  text: item.name || item.text || t('I importuar', 'Imported'),
+                  done: !!item.done,
+                  createdAt: item.createdAt || new Date().toISOString(),
+                  updatedAt: item.updatedAt || new Date().toISOString()
+               }));
+            } else if (parsed.blueText !== undefined) {
+               setBlueText(parsed.blueText);
+               localStorage.setItem('grid_notepad_blue', parsed.blueText);
+               importedList = [{
+                  id: 'legacy-imported',
+                  name: t('Shënime të Importuara', 'Imported Notes'),
+                  content: parsed.blueText,
+                  text: t('Shënime të Importuara', 'Imported Notes'),
+                  done: false,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString()
+               }];
+            }
+            
+            if (importedList.length > 0) {
+               const merged = [...secretList];
+               importedList.forEach(item => {
+                  const idx = merged.findIndex(m => m.id === item.id);
+                  if (idx >= 0) {
+                     merged[idx] = item;
+                  } else {
+                     merged.push(item);
+                  }
+               });
+               setSecretList(merged);
+               localStorage.setItem('grid_notepad_secret_list', JSON.stringify(merged));
+               showToast(t("🔒 Të dhënat sekrete u importuan me sukses!", "🔒 Secret data imported successfully!"));
+            } else {
+               const textContent = event.target?.result as string;
+               handleCreateSecretListItem(t('Import Tekst', 'Import Text'));
+               setSecretList(prev => {
+                  const updated = [...prev];
+                  if (updated.length > 0) {
+                     updated[updated.length - 1].content = textContent;
+                  }
+                  return updated;
+               });
+               showToast(t("🔒 U importua si bllok sekret i ri.", "🔒 Imported as a new secret block."));
+            }
+         } catch (err) {
+            const textContent = event.target?.result as string;
+            const newId = Date.now().toString();
+            const newItem = {
+               id: newId,
+               name: t('Tekst i Importuar', 'Imported Text'),
+               content: textContent,
+               text: t('Tekst i Importuar', 'Imported Text'),
+               done: false,
+               createdAt: new Date().toISOString(),
+               updatedAt: new Date().toISOString()
+            };
+            const updated = [...secretList, newItem];
+            setSecretList(updated);
+            localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+            setActiveSecretId(newId);
+            showToast(t("🔒 U importua si bllok i ri sekret.", "🔒 Imported as a new secret block."));
+         }
+      };
+      reader.readAsText(file);
+   };
 
   const loadFromGoogleCloud = async (silent = false) => {
     setIsFetchingCloud(true);
@@ -2096,8 +2251,46 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
        setBlueText(savedOrange);
     }
     const savedSecretList = localStorage.getItem('grid_notepad_secret_list');
+    let loadedList: any[] = [];
     if (savedSecretList) {
-       try { setSecretList(JSON.parse(savedSecretList)); } catch(e){}
+       try { 
+          const parsed = JSON.parse(savedSecretList);
+          if (Array.isArray(parsed)) {
+             loadedList = parsed.map((item: any) => {
+                // Migrate legacy flat checklist with 'note' field to the rich named note model
+                const hasContent = item.content !== undefined;
+                return {
+                   id: item.id || Date.now().toString() + Math.random().toString(),
+                   name: item.name || item.text || t('Element i vjetër', 'Legacy Item'),
+                   content: hasContent ? item.content : (item.note || ''),
+                   text: item.name || item.text || t('Element i vjetër', 'Legacy Item'),
+                   done: !!item.done,
+                   createdAt: item.createdAt || new Date().toISOString(),
+                   updatedAt: item.updatedAt || new Date().toISOString()
+                };
+             });
+          }
+       } catch(e){}
+    }
+    
+    // If we have legacy blueText, but no secret list, auto-migrate it as a single block so they don't lose it
+    if (loadedList.length === 0 && savedOrange && savedOrange.trim()) {
+       loadedList = [{
+          id: 'migrated-primary',
+          name: t('Blloku Kryesor', 'Primary Block'),
+          content: savedOrange,
+          text: t('Blloku Kryesor', 'Primary Block'),
+          done: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+       }];
+    }
+    
+    if (loadedList.length > 0) {
+       setSecretList(loadedList);
+       localStorage.setItem('grid_notepad_secret_list', JSON.stringify(loadedList));
+       // Pre-select the first item
+       setActiveSecretId(loadedList[0].id);
     }
   }, []);
 
@@ -6078,231 +6271,324 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       {/* ORANGE NOTES MODAL */}
       {blueModal && (
           <div className="fixed inset-0 z-[100] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center bg-black/60 sm:p-4 animate-in fade-in">
-             <div className={`w-full h-[100dvh] sm:max-w-2xl sm:h-[80vh] flex flex-col sm:rounded-2xl shadow-2xl border-0 sm:border ${isDark ? "bg-zinc-900 sm:border-blue-500/30" : "bg-white sm:border-blue-300"}`}>
+             <div className={`w-full h-[100dvh] sm:max-w-4xl sm:h-[85vh] flex flex-col sm:rounded-2xl shadow-2xl border-0 sm:border ${isDark ? "bg-zinc-900 sm:border-blue-500/30" : "bg-white sm:border-blue-300"}`}>
                 <div className={`flex justify-between items-center p-4 border-b shrink-0 ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
                    <h3 className={`text-xl font-bold flex items-center gap-2 ${isDark ? "text-blue-500" : "text-blue-600"}`}>
-                      <Lock className="w-5 h-5" /> Shënime Sekrete
+                      <Lock className="w-5 h-5 animate-pulse text-blue-500" /> {t('Blloku i Shënimeve Sekrete', 'Secret Notepad Block')}
                    </h3>
-                   <button onClick={() => setBlueModal(false)} className="p-2 bg-transparent text-zinc-500 hover:text-red-500 transition-colors">
+                   <button onClick={() => setBlueModal(false)} className="p-2 bg-transparent text-zinc-500 hover:text-red-500 transition-colors rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
                       <X className="w-5 h-5"/>
                    </button>
                 </div>
 
                 {/* Sub-toolbar inside Secrets Modal */}
-                <div className={`p-3 border-b flex flex-wrap gap-1.5 justify-start items-center shrink-0 ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
-                   <button 
-                      onClick={() => setSecretActiveTab('editor')} 
-                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border flex items-center gap-1 ${
-                         secretActiveTab === 'editor' 
-                         ? (isDark ? "bg-blue-600 border-transparent text-white" : "bg-blue-500 border-transparent text-white") 
-                         : (isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700" : "bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-200")
-                      }`}
-                   >
-                      <FileText className="w-3.5 h-3.5 text-current" /> Editor
-                   </button>
+                <div className={`p-3 border-b flex flex-wrap gap-1.5 justify-between items-center shrink-0 ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+                   <div className="flex flex-wrap gap-1.5">
+                      <button 
+                         onClick={() => handleCreateSecretListItem()} 
+                         className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all border shadow-sm flex items-center gap-1.5 bg-green-600 hover:bg-green-500 text-white border-transparent`}
+                         title="Krijo bllok të ri sekret"
+                      >
+                         <Plus className="w-4 h-4" /> {t('Bllok i Ri', 'New Block')}
+                      </button>
 
-                   <button 
-                       onClick={() => setSecretActiveTab('list')} 
-                       className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border flex items-center gap-1 ${
-                          secretActiveTab === 'list' 
-                          ? (isDark ? "bg-blue-600 border-transparent text-white" : "bg-blue-500 border-transparent text-white") 
-                          : (isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700" : "bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-200")
-                       }`}
-                    >
-                       <CheckCheck className="w-3.5 h-3.5 text-current" /> Listë
-                    </button>
+                      <button 
+                         onClick={handleSaveSecrets} 
+                         className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all border shadow-sm flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white border-transparent`}
+                         title="Ruaj dhe Sinkronizo të dhënat"
+                      >
+                         <Save className="w-4 h-4" /> {t('Ruaj / Sinkro', 'Save & Sync')}
+                      </button>
+                   </div>
 
-                    <div className="h-4 w-px bg-zinc-500/30 mx-1" />
+                   <div className="flex flex-wrap gap-1.5">
+                      <button 
+                         onClick={handleImportSecretsClick} 
+                         className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all border shadow-sm flex items-center gap-1.5 ${
+                            isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border-zinc-750" : "bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-200"
+                         }`}
+                         title="Importo backup"
+                      >
+                         <FolderUp className="w-4 h-4 text-blue-500" /> {t('Import', 'Import')}
+                      </button>
 
-                    <button 
-                       onClick={secretActiveTab === 'list' ? handleCreateSecretListItem : handleCreateSecretEditorNote} 
-                       className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${
-                          isDark ? "bg-green-600 hover:bg-green-500 text-white border-transparent" : "bg-green-500 hover:bg-green-600 text-white border-transparent"
-                       }`}
-                       title="Krijo element/shënim të ri"
-                    >
-                       <Plus className="w-3.5 h-3.5" /> Krijo
-                    </button>
+                      <button 
+                         onClick={handleExportSecrets} 
+                         className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all border shadow-sm flex items-center gap-1.5 ${
+                            isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border-zinc-750" : "bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-200"
+                         }`}
+                         title="Eksporto të gjitha si JSON"
+                      >
+                         <FolderDown className="w-4 h-4 text-indigo-500" /> {t('Backup JSON', 'Backup JSON')}
+                      </button>
 
-                    <button 
-                       onClick={handleSelectAllSecrets} 
-                       className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${
-                          isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700" : "bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-200"
-                       } ${secretActiveTab !== 'list' ? 'opacity-40 cursor-not-allowed' : ''}`}
-                       title="Zgjidh të gjitha / Çpërzgjidh"
-                       disabled={secretActiveTab !== 'list'}
-                    >
-                       <Square className="w-3.5 h-3.5" /> Zgjidh All
-                    </button>
-
-                    <button 
-                       onClick={handleSaveSecrets} 
-                       className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${
-                          isDark ? "bg-emerald-600 hover:bg-emerald-500 text-white border-transparent" : "bg-emerald-500 hover:bg-emerald-600 text-white border-transparent"
-                       }`}
-                       title="Ruaj"
-                    >
-                       <Save className="w-3.5 h-3.5" /> Ruaj
-                    </button>
-
-                    <button 
-                       onClick={handleDeleteSecrets} 
-                       className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${
-                          isDark ? "bg-red-600 hover:bg-red-500 text-white border-transparent" : "bg-red-500 hover:bg-red-600 text-white border-transparent"
-                       }`}
-                       title="Fshij elementet e përzgjedhur apo pastro editorin"
-                    >
-                       <Trash2 className="w-3.5 h-3.5" /> Fshij
-                    </button>
-
-                    <button 
-                       onClick={handleImportSecretsClick} 
-                       className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${
-                          isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700" : "bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-200"
-                       }`}
-                       title="Importo të dhëna"
-                    >
-                       <FolderUp className="w-3.5 h-3.5" /> Import
-                    </button>
-
-                    <button 
-                       onClick={handleExportSecrets} 
-                       className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors border shadow-sm flex items-center gap-1 ${
-                          isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700" : "bg-white hover:bg-zinc-100 text-zinc-700 border-zinc-200"
-                       }`}
-                       title="Eksporto të dhëna"
-                    >
-                       <FolderDown className="w-3.5 h-3.5" /> Export
-                    </button>
-
-                    <input 
-                       type="file" 
-                       ref={secretFileInputRef} 
-                       onChange={handleImportSecretsFile} 
-                       accept=".json,.txt" 
-                       className="hidden" 
-                    />
-                 </div>
-                 
-                 <div className={`flex-1 p-5 overflow-y-auto ${isDark ? "bg-zinc-950" : "bg-blue-50/30"}`}>
-
-                    <div className="flex flex-col h-full gap-4">
-                       {secretActiveTab === 'list' ? (
-                          /* Lista e Sekreteve */
-                          <div className={`flex-1 rounded-xl p-3 flex flex-col min-h-[300px] ${isDark ? "bg-zinc-900 border border-zinc-800" : "bg-white border border-zinc-200 shadow-sm"}`}>
-                             <div className="flex items-center justify-between mb-3 border-b pb-2">
-                                <h4 className={`text-sm font-bold ${isDark ? "text-blue-400" : "text-blue-600"}`}>Lista e Sekreteve</h4>
-                                <span className="text-xs text-zinc-500 font-mono">Total: {secretList.length}</span>
-                             </div>
-                             <div className="flex-1 overflow-y-auto pr-1 scrollbar-hide space-y-2">
-                                {secretList.length === 0 && (
-                                   <p className={`text-xs text-center mt-10 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Nuk ka asnjë element në listë. Kliko "Krijo" më sipër për të shtuar.</p>
-                                )}
-                                {secretList.map((item, idx) => (
-                                   <div key={item.id} className={`flex items-start gap-3 group border-b pb-2 pt-1 transition-colors ${isDark ? "border-zinc-800/60 hover:bg-zinc-800/20" : "border-zinc-100 hover:bg-blue-50/10"}`}>
-                                      <button 
-                                        type="button"
-                                        onClick={() => {
-                                           const updated = [...secretList];
-                                           updated[idx].done = !updated[idx].done;
-                                           setSecretList(updated);
-                                           localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
-                                        }}
-                                        className={`mt-1.5 w-4 h-4 rounded-full border flex items-center justify-center shrink-0 transition-all ${
-                                          item.done 
-                                           ? "bg-blue-500 border-blue-500 text-white scale-110 shadow-sm" 
-                                           : (isDark ? "border-zinc-700 text-transparent hover:border-blue-500" : "border-zinc-300 text-transparent hover:border-blue-500")
-                                        }`}
-                                      >
-                                         <Check className="w-2.5 h-2.5 stroke-[3]" />
-                                      </button>
-                                      
-                                      <div className="flex-1 flex flex-col gap-1 min-w-0">
-                                         <input
-                                           type="text"
-                                           value={item.text}
-                                           onChange={(e) => {
-                                              const updated = [...secretList];
-                                              updated[idx].text = e.target.value;
-                                              setSecretList(updated);
-                                              localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
-                                           }}
-                                           placeholder="Emri i sekretit..."
-                                           className={`w-full bg-transparent border-none outline-none text-sm font-bold p-0 placeholder-zinc-500 ${
-                                              item.done 
-                                              ? (isDark ? "text-zinc-500 line-through font-normal" : "text-zinc-400 line-through font-normal") 
-                                              : (isDark ? "text-zinc-100" : "text-zinc-800")
-                                           }`}
-                                         />
-                                         <input
-                                           type="text"
-                                           value={item.note || ''}
-                                           onChange={(e) => {
-                                              const updated = [...secretList];
-                                              updated[idx].note = e.target.value;
-                                              setSecretList(updated);
-                                              localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
-                                           }}
-                                           placeholder="Shto shënim përkatës për këtë sekret..."
-                                           className={`w-full bg-transparent border-none outline-none text-xs p-0 placeholder-zinc-500/60 ${
-                                              item.done 
-                                              ? (isDark ? "text-zinc-600 line-through" : "text-zinc-400 line-through") 
-                                              : (isDark ? "text-zinc-400" : "text-zinc-500")
-                                           }`}
-                                         />
-                                      </div>
-
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                           const updated = secretList.filter(i => i.id !== item.id);
-                                           setSecretList(updated);
-                                           localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
-                                        }}
-                                        className="mt-1 opacity-0 group-hover:opacity-100 p-1 text-zinc-400 hover:text-red-500 hover:bg-red-500/10 rounded transition-all shrink-0"
-                                        title="Fshi këtë sekret"
-                                      >
-                                         <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                   </div>
-                                ))}
-                             </div>
-                          </div>
-                      ) : (
-                          /* Hartim Text (Text Drafting) */
-                         <div className={`flex-1 rounded-xl p-3 flex flex-col min-h-[300px] ${isDark ? "bg-zinc-950 border border-zinc-800" : "bg-white border border-zinc-200 shadow-sm"}`}>
-                            <div className="flex items-center justify-between mb-2 border-b pb-2">
-                               <h4 className={`text-sm font-bold ${isDark ? "text-blue-400" : "text-blue-600"}`}>Hartim Tekst</h4>
-                               <span className="text-xs text-zinc-500 font-mono">Gjatësia: {blueText.length}</span>
-                            </div>
-                            <textarea
-                               autoFocus
-                               value={blueText}
-                               onChange={(e) => {
-                                   const val = e.target.value;
-                                   setBlueText(val);
-                                   localStorage.setItem('grid_notepad_blue', val);
-                               }}
-                               placeholder="Këtu mund të mbani shënime të rëndësishme ose sekrete të mbrojtura me Password..."
-                               className={`w-full h-full bg-transparent resize-none focus:outline-none text-sm leading-relaxed scrollbar-hide min-h-[250px] ${
-                                 isDark ? "text-zinc-200 placeholder-zinc-700" : "text-zinc-800 placeholder-zinc-400"
-                               }`}
-                               spellCheck={false}
-                            />
-                         </div>
+                      {secretList.length > 0 && (
+                         <button 
+                            onClick={handleDeleteSecrets} 
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all border shadow-sm flex items-center gap-1.5 bg-red-600/10 text-red-500 hover:bg-red-600 hover:text-white border-transparent`}
+                            title="Fshi bllokun aktiv apo pastro të gjitha"
+                         >
+                            <Trash2 className="w-4 h-4" /> {t('Fshi', 'Delete')}
+                         </button>
                       )}
+                   </div>
+
+                   <input 
+                      type="file" 
+                      ref={secretFileInputRef} 
+                      onChange={handleImportSecretsFile} 
+                      accept=".json,.txt" 
+                      className="hidden" 
+                   />
+                </div>
+                
+                {/* Main Content Pane */}
+                <div className={`flex-1 flex overflow-hidden ${isDark ? "bg-zinc-950" : "bg-zinc-50"}`}>
+                   
+                   {/* Left Sidebar: List of named notebooks */}
+                   <div className={`${activeSecretId ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r flex flex-col shrink-0 ${isDark ? "border-zinc-800 bg-zinc-900/40" : "border-zinc-200 bg-white"}`}>
+                      {/* Search bar inside sidebar */}
+                      <div className="p-3 border-b relative dark:border-zinc-800 flex items-center gap-2">
+                         <div className="relative flex-1">
+                            <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input 
+                               type="text"
+                               value={secretSearchQuery}
+                               onChange={(e) => setSecretSearchQuery(e.target.value)}
+                               placeholder={t("Kërko shënime...", "Search notes...")}
+                               className={`w-full pl-9 pr-8 py-1.5 text-xs rounded-lg border outline-none transition-colors ${
+                                  isDark 
+                                  ? "bg-zinc-950 border-zinc-800 text-zinc-200 focus:border-blue-500" 
+                                  : "bg-zinc-50 border-zinc-200 text-zinc-800 focus:border-blue-500 focus:bg-white"
+                               }`}
+                            />
+                            {secretSearchQuery && (
+                               <button 
+                                  onClick={() => setSecretSearchQuery('')}
+                                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                               >
+                                  <X className="w-3.5 h-3.5" />
+                               </button>
+                            )}
+                         </div>
+                      </div>
+
+                      {/* Scrollable List */}
+                      <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin">
+                         {(() => {
+                            const filtered = secretList.filter(item => {
+                               const q = secretSearchQuery.toLowerCase().trim();
+                               if (!q) return true;
+                               const nameMatch = (item.name || item.text || '').toLowerCase().includes(q);
+                               const contentMatch = (item.content || '').toLowerCase().includes(q);
+                               return nameMatch || contentMatch;
+                            });
+
+                            if (filtered.length === 0) {
+                               return (
+                                  <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                                     <FileText className="w-8 h-8 text-zinc-400/60 mb-2" />
+                                     <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                                        {secretSearchQuery 
+                                           ? t("Nuk u gjet asnjë bllok.", "No blocks found.") 
+                                           : t("Krijo një bllok sekret për të filluar.", "Create a secret block to start.")}
+                                     </p>
+                                  </div>
+                               );
+                            }
+
+                            return filtered.map((item) => {
+                               const isActive = item.id === activeSecretId;
+                               const snippet = item.content ? item.content.slice(0, 60) + (item.content.length > 60 ? '...' : '') : t('Pa përmbajtje...', 'No content...');
+                               const itemDate = item.updatedAt ? format(new Date(item.updatedAt), 'dd.MM.yyyy HH:mm') : '';
+
+                               return (
+                                  <div 
+                                     key={item.id}
+                                     className={`group relative flex items-center justify-between rounded-xl p-2.5 cursor-pointer transition-all ${
+                                        isActive 
+                                        ? "bg-blue-600/10 border border-blue-500/20 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400 dark:border-blue-500/30" 
+                                        : (isDark ? "hover:bg-zinc-800/60 border border-transparent text-zinc-300" : "hover:bg-zinc-100 border border-transparent text-zinc-800")
+                                     }`}
+                                     onClick={() => setActiveSecretId(item.id)}
+                                  >
+                                     <div className="flex-1 min-w-0 pr-6">
+                                        <div className="flex items-center gap-1.5 mb-0.5">
+                                           <Lock className={`w-3 h-3 shrink-0 ${isActive ? "text-blue-500" : "text-zinc-400"}`} />
+                                           <span className={`text-sm font-semibold truncate ${isActive ? "text-blue-600 dark:text-blue-400" : (isDark ? "text-zinc-200" : "text-zinc-900")}`}>
+                                              {item.name || item.text || t('Pa Emër', 'Unnamed')}
+                                           </span>
+                                        </div>
+                                        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 truncate mb-1">
+                                           {snippet}
+                                        </p>
+                                        {itemDate && (
+                                           <span className="text-[9px] text-zinc-400 font-mono block">
+                                              {itemDate}
+                                           </span>
+                                        )}
+                                     </div>
+
+                                     {/* Quick Delete button inside item */}
+                                     <button
+                                        onClick={(e) => {
+                                           e.stopPropagation();
+                                           handleDeleteSecretItem(item.id);
+                                        }}
+                                        className="opacity-0 group-hover:opacity-100 absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-400 hover:text-red-500 hover:bg-red-500/10 rounded transition-all shrink-0"
+                                        title={t("Fshi bllokun", "Delete block")}
+                                     >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                     </button>
+                                  </div>
+                               );
+                            });
+                         })()}
+                      </div>
+                   </div>
+
+                   {/* Right Workspace: Rich note writing workspace */}
+                   <div className={`${!activeSecretId ? 'hidden md:flex' : 'flex'} flex-1 flex-col overflow-hidden ${isDark ? "bg-zinc-950" : "bg-white"}`}>
+                      {(() => {
+                         const activeNote = secretList.find(item => item.id === activeSecretId);
+
+                         if (!activeNote) {
+                            return (
+                               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-zinc-50/20 dark:bg-zinc-950/10">
+                                  <div className="p-4 rounded-full bg-blue-500/5 dark:bg-blue-500/10 mb-4 animate-bounce">
+                                     <Lock className="w-10 h-10 text-blue-500" />
+                                  </div>
+                                  <h4 className="text-base font-bold mb-1">{t("Zgjidhni një Bllok", "Select a Block")}</h4>
+                                  <p className="text-sm text-zinc-400 max-w-sm">
+                                     {t("Zgjidhni një bllok sekret nga lista anësore ose krijoni një të ri për të shkruar shënime të mbrojtura.", "Select a secret block from the sidebar list or create a new one to write protected notes.")}
+                                  </p>
+                               </div>
+                            );
+                         }
+
+                         const wordCount = activeNote.content ? activeNote.content.trim().split(/\s+/).filter(Boolean).length : 0;
+                         const charCount = activeNote.content ? activeNote.content.length : 0;
+
+                         return (
+                            <div className="flex-1 flex flex-col overflow-hidden">
+                               {/* Active Note Header Toolbar */}
+                               <div className={`flex items-center justify-between p-3 border-b shrink-0 ${isDark ? "border-zinc-800 bg-zinc-900/40" : "border-zinc-100 bg-zinc-50/50"}`}>
+                                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                                     <button 
+                                        onClick={() => setActiveSecretId(null)}
+                                        className="md:hidden p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 rounded-lg shrink-0"
+                                        title={t("Kthehu te lista", "Back to list")}
+                                     >
+                                        <ArrowLeft className="w-4 h-4" />
+                                     </button>
+
+                                     {/* Title Input */}
+                                     <input 
+                                        type="text"
+                                        value={activeNote.name || activeNote.text || ''}
+                                        onChange={(e) => {
+                                           const val = e.target.value;
+                                           const updated = secretList.map(item => {
+                                              if (item.id === activeNote.id) {
+                                                 return {
+                                                    ...item,
+                                                    name: val,
+                                                    text: val,
+                                                    updatedAt: new Date().toISOString()
+                                                 };
+                                              }
+                                              return item;
+                                           });
+                                           setSecretList(updated);
+                                           localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+                                        }}
+                                        placeholder={t("Emri i bllokut sekret...", "Secret block name...")}
+                                        className="bg-transparent border-none outline-none text-base font-bold text-zinc-900 dark:text-zinc-100 flex-1 min-w-0 py-1"
+                                     />
+                                  </div>
+
+                                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                                     {/* Copy note contents */}
+                                     <button 
+                                        onClick={() => {
+                                           navigator.clipboard.writeText(activeNote.content || '');
+                                           showToast(t("Përmbajtja u kopjua!", "Content copied!"));
+                                        }}
+                                        className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 hover:text-blue-500 rounded-lg transition-colors"
+                                        title={t("Kopjo", "Copy")}
+                                     >
+                                        <FileText className="w-4 h-4" />
+                                     </button>
+
+                                     {/* Shkarko në folder si TXT */}
+                                     <button 
+                                        onClick={() => handleExportActiveNoteAsTxt(activeNote)}
+                                        className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 hover:text-indigo-500 rounded-lg transition-colors"
+                                        title={t("Shkarko si TXT (Në Memorje)", "Download as TXT (To Storage)")}
+                                     >
+                                        <FolderDown className="w-4 h-4" />
+                                     </button>
+
+                                     {/* Delete Note */}
+                                     <button 
+                                        onClick={() => handleDeleteSecretItem(activeNote.id)}
+                                        className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-400 hover:text-red-500 rounded-lg transition-colors"
+                                        title={t("Fshi këtë bllok", "Delete this block")}
+                                     >
+                                        <Trash2 className="w-4 h-4" />
+                                     </button>
+                                  </div>
+                               </div>
+
+                               {/* Note Area / Textarea */}
+                               <div className="flex-1 relative overflow-hidden flex flex-col p-4 sm:p-6 bg-transparent">
+                                  <textarea
+                                     value={activeNote.content || ''}
+                                     onChange={(e) => {
+                                        const val = e.target.value;
+                                        const updated = secretList.map(item => {
+                                           if (item.id === activeNote.id) {
+                                              return {
+                                                 ...item,
+                                                 content: val,
+                                                 updatedAt: new Date().toISOString()
+                                              };
+                                           }
+                                           return item;
+                                        });
+                                        setSecretList(updated);
+                                        localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+                                     }}
+                                     placeholder={t("Shkruani shënimet tuaja sekrete këtu...", "Write your secret notes here...")}
+                                     className={`w-full flex-1 bg-transparent resize-none focus:outline-none text-sm md:text-base leading-relaxed p-0 ${
+                                        isDark ? "text-zinc-200 placeholder-zinc-700" : "text-zinc-800 placeholder-zinc-400"
+                                     }`}
+                                     spellCheck={false}
+                                  />
+                                  
+                                  {/* Counts footer */}
+                                  <div className="flex items-center justify-end border-t dark:border-zinc-800/50 pt-3 mt-3 text-[10px] text-zinc-400 font-mono shrink-0">
+                                     <span>{wordCount} {t("fjalë", "words")}</span>
+                                     <span className="mx-2 font-light">|</span>
+                                     <span>{charCount} {t("karaktere", "characters")}</span>
+                                  </div>
+                               </div>
+                            </div>
+                         );
+                      })()}
                    </div>
 
                 </div>
                 
+                {/* Footer and Auto-save indicator */}
                 <div className={`p-4 flex items-center justify-between border-t shrink-0 ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
                    <span className={`text-xs font-semibold flex items-center gap-1.5 ${isDark ? "text-green-500" : "text-green-600"}`}>
-                     <Check className="w-3.5 h-3.5" /> Ruhet automatikisht
+                     <Check className="w-3.5 h-3.5" /> {t("Sinkronizuar në memorje", "Synced in memory")}
                    </span>
                    <button onClick={() => {
                        setBlueModal(false);
-                   }} className={`px-5 py-2 font-medium rounded-lg transition-colors bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20`}>
-                      Mbyll
+                   }} className={`px-5 py-2 font-semibold text-xs rounded-lg transition-all bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20`}>
+                      {t("Mbyll", "Close")}
                    </button>
                 </div>
              </div>
@@ -8502,113 +8788,58 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                             <div className="flex flex-col gap-3.5 p-4 rounded-xl border border-green-500/20 bg-green-500/5 dark:bg-green-500/10 w-full shadow-sm">
                                 <span className="leading-tight font-bold text-sm text-green-600 dark:text-green-500 flex items-center gap-1.5">
                                     <Folder className="w-4 h-4 text-green-500" />
-                                    {t('Vendndodhja dhe Dosja Ruajtëse', 'Storage Location & Folder')}
+                                    {t('Vendndodhja e Memories së Telefonit', 'Phone Storage Location')}
                                 </span>
-                                
-                                {Capacitor.isNativePlatform() && (
-                                    <div className="text-[11px] font-medium text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400 p-2.5 rounded border border-blue-200/50 dark:border-blue-800/30">
-                                       {t('Në celular (Android), skedarët do të ruhen automatikisht në memorien tuaj te dosja "Documents/EmriQëShkruaniMëPoshtë".', 'On mobile, files will automatically be saved to Documents/FolderYouSpecifyBelow.')}
-                                    </div>
-                                )}
 
-                                {/* Android Base Directory Picker */}
-                                {Capacitor.isNativePlatform() && (
-                                    <div className="flex flex-col gap-1 w-full">
-                                        <label className={`text-[11px] font-semibold ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
-                                            {t('Zgjidh Vendndodhjen (Memory Phone):', 'Select Phone Memory Location:')}
-                                        </label>
-                                        <select
-                                            value={androidBaseDir}
-                                            onChange={(e) => {
-                                                const val = e.target.value;
-                                                setAndroidBaseDir(val);
-                                                localStorage.setItem('grid_android_base_dir', val);
-                                                showToast(t(`Vendndodhja e bazës u ndryshua në: ${val}`, `Base location changed to: ${val}`));
-                                            }}
-                                            className={`w-full p-2 rounded border text-xs font-semibold focus:outline-none transition-colors ${
-                                                isDark 
-                                                    ? "bg-zinc-900 border-zinc-800 text-zinc-200 focus:border-green-500" 
-                                                    : "bg-white border-zinc-300 text-zinc-800 focus:border-green-500"
-                                            }`}
-                                        >
-                                            <option value="Documents">{t('Documents (Dokumentet - Standard)', 'Documents (Standard)')}</option>
-                                            <option value="Cache">{t('Cache (Memorja e përkohshme)', 'Cache (Temporary)')}</option>
-                                            <option value="Data">{t('Data (Dosja e Aplikacionit)', 'Data (App Sandbox)')}</option>
-                                            <option value="ExternalStorage">{t('ExternalStorage (Memorja e Jashtme)', 'ExternalStorage (Shared Storage)')}</option>
-                                        </select>
+                                <div className={`p-3 rounded-lg border flex flex-col gap-1.5 ${isDark ? 'bg-zinc-950/60 border-zinc-800' : 'bg-zinc-50 border-zinc-200'}`}>
+                                    <div className="flex items-center gap-2 text-xs font-semibold text-zinc-400">
+                                        <Smartphone className="w-4 h-4 text-green-500" />
+                                        <span>{t('Pajisja / Lokacioni:', 'Device / Location:')}</span>
+                                        <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-bold ${isDark ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-200 text-zinc-808'}`}>
+                                            {activeProvider}
+                                        </span>
                                     </div>
-                                )}
-                                
-                                <div className="flex flex-col gap-1.5 w-full">
-                                    <label className={`text-[11px] font-semibold ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
-                                        {t('Shkruaj manualisht emrin/rrugën e Dosjes për celular (p.sh. Blloku, Shënime):', 'Manually write Folder name/path for mobile (e.g. Notebook, Notes):')}
-                                    </label>
-                                    <input 
-                                        type="text"
-                                        value={folderName}
-                                        onChange={(e) => {
-                                            const val = e.target.value;
-                                            setFolderName(val);
-                                            localStorage.setItem('grid_mock_folder', val);
-                                        }}
-                                        placeholder={t('Shkruaj emrin e dosjes këtu (p.sh. Blloku/Shënime)...', 'Type folder name here (e.g. Blloku/Notes)...')}
-                                        className={`w-full p-2.5 text-xs rounded border transition-colors outline-none font-medium ${
-                                            isDark 
-                                                ? "bg-zinc-900 border-zinc-800 text-white placeholder-zinc-600 focus:border-green-500" 
-                                                : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400 focus:border-green-500"
-                                        }`}
-                                    />
-                                </div>
-
-                                {/* Quick selection folder pills */}
-                                <div className="flex flex-col gap-1 w-full">
-                                    <span className={`text-[10px] font-semibold ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-                                        {t('Përzgjidh shpejt një dosje alternative:', 'Quick select an alternative folder:')}
-                                    </span>
-                                    <div className="flex flex-wrap gap-1.5 mt-0.5">
-                                        {['Blloku', 'Shënime', 'Kopje', 'Blloku/Shënime', 'Blloku/Eksporte'].map((fld) => (
-                                            <button
-                                                key={fld}
-                                                type="button"
-                                                onClick={() => {
-                                                    setFolderName(fld);
-                                                    localStorage.setItem('grid_mock_folder', fld);
-                                                    showToast(t(`U përzgjodh dosja: ${fld}`, `Selected folder: ${fld}`));
-                                                }}
-                                                className={`px-2 py-1 text-[10px] font-bold rounded transition-colors border ${
-                                                    folderName === fld
-                                                        ? "bg-green-600 border-transparent text-white shadow-sm"
-                                                        : isDark
-                                                            ? "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700"
-                                                            : "bg-zinc-100 border-zinc-200 text-zinc-700 hover:bg-zinc-200"
-                                                }`}
-                                            >
-                                                {fld}
-                                            </button>
-                                        ))}
+                                    <div className="flex items-center gap-2 text-xs font-semibold text-zinc-400">
+                                        <FolderOpen className="w-4 h-4 text-sky-500" />
+                                        <span>{t('Dosja e Përzgjedhur:', 'Selected Folder:')}</span>
+                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${isDark ? 'bg-zinc-800 text-sky-400' : 'bg-zinc-200 text-sky-600'}`}>
+                                            {folderName ? folderName : t('Dosja Rrënjë (Baza)', 'Root Folder (Base)')}
+                                        </span>
+                                    </div>
+                                    <div className="flex flex-col gap-1 text-[10px] font-mono mt-1 text-green-600 dark:text-green-400">
+                                        <span className="opacity-75 uppercase tracking-wider font-bold text-[9px]">{t('Rruga e Plotë e Ruajtjes:', 'Full Storage Path:')}</span>
+                                        <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap scrollbar-hide py-0.5">
+                                            <span>📁</span>
+                                            <span className="font-bold underline">{androidBaseDir}</span>
+                                            <span>/</span>
+                                            {folderName ? (
+                                                <>
+                                                    <span className="font-bold text-sky-500 dark:text-sky-400">{folderName}</span>
+                                                    <span>/</span>
+                                                </>
+                                            ) : null}
+                                            <span className="opacity-60">[skedari].pdf / .txt</span>
+                                        </div>
                                     </div>
                                 </div>
 
-                                {/* Visual path preview */}
-                                <div className={`p-2.5 rounded-lg text-[10px] font-mono flex flex-col gap-1 ${
-                                    isDark ? "bg-zinc-950/60 border border-zinc-800/80 text-green-400" : "bg-zinc-100 border border-zinc-200 text-green-700"
-                                }`}>
-                                    <span className={`text-[9px] font-bold uppercase tracking-wider ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-                                        {t('Rruga e plotë e ruajtjes:', 'Full storage destination path:')}
-                                    </span>
-                                    <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap scrollbar-hide py-0.5">
-                                        <span className="opacity-75">📁</span>
-                                        <span className="font-bold underline">{Capacitor.isNativePlatform() ? androidBaseDir : 'Downloads'}</span>
-                                        <span>/</span>
-                                        {folderName ? (
-                                            <>
-                                                <span className="font-bold text-sky-500 dark:text-sky-400">{folderName}</span>
-                                                <span>/</span>
-                                            </>
-                                        ) : null}
-                                        <span className="opacity-60">[dokumenti].pdf</span>
-                                    </div>
-                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowStoragePickerModal(true);
+                                        setActiveProvider('M35 e GE');
+                                        setCurrentPath([]);
+                                        setShowStorageSidebar(false);
+                                    }}
+                                    className={`w-full py-2.5 px-4 text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2 border active:scale-95 ${
+                                        isDark 
+                                            ? 'bg-green-600 hover:bg-green-550 border-transparent text-white shadow-md shadow-green-950/20' 
+                                            : 'bg-green-500 hover:bg-green-600 border-transparent text-white shadow-md'
+                                    }`}
+                                >
+                                    <FolderOpen className="w-4 h-4" />
+                                    {t('NDRYSHO DOSJEN NGA MEMORIA E TELEFONIT', 'CHANGE FOLDER FROM PHONE STORAGE')}
+                                </button>
 
                                 <div className="h-px w-full bg-green-500/20 my-1"></div>
                                 {!Capacitor.isNativePlatform() && (
