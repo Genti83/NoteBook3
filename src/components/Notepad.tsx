@@ -404,6 +404,42 @@ export function Notepad() {
       localStorage.setItem('grid_simulated_fs', JSON.stringify(simulatedFilesystem));
   }, [simulatedFilesystem]);
 
+  const addFileToSimulatedFilesystem = (filename: string, blobSize: number) => {
+      const baseDir = localStorage.getItem('grid_android_base_dir') || 'Memoria e Telefonit';
+      const mockFolder = localStorage.getItem('grid_mock_folder') || '';
+      const folderKey = baseDir + (mockFolder ? '/' + mockFolder : '');
+      
+      let sizeStr = '0 B';
+      if (blobSize > 1024 * 1024) {
+          sizeStr = (blobSize / (1024 * 1024)).toFixed(1) + ' MB';
+      } else if (blobSize > 1024) {
+          sizeStr = (blobSize / 1024).toFixed(1) + ' KB';
+      } else {
+          sizeStr = blobSize + ' B';
+      }
+      
+      const dateStr = new Date().toLocaleDateString('sq-AL', { day: 'numeric', month: 'short', year: 'numeric' });
+      
+      setSimulatedFilesystem(prev => {
+          const next = { ...prev };
+          if (!next[folderKey]) {
+              next[folderKey] = [];
+          }
+          
+          const items = next[folderKey];
+          if (items.some(item => item.name === filename && item.type === 'file')) {
+              return prev;
+          }
+          
+          next[folderKey] = [
+              ...items,
+              { name: filename, type: 'file', size: sizeStr, date: dateStr }
+          ];
+          
+          return next;
+      });
+  };
+
   const getCapacitorDirectory = (dirStr: string) => {
       switch (dirStr) {
           case 'Cache': return Directory.Cache;
@@ -3346,6 +3382,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
 
   const handleDownload = async (blob: Blob, filename: string, mimeType: string, shareTitle: string) => {
+      // Shto skedarin në sistemin e simuluar të skedarëve që të shfaqet në "Zgjedhësin e Dosjeve"
+      addFileToSimulatedFilesystem(filename, blob.size);
       try {
           if (Capacitor.isNativePlatform()) {
               const reader = new FileReader();
