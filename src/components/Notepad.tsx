@@ -1,843 +1,492 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { getDirectoryHandle, saveDirectoryHandle } from '../lib/directoryFS';
-import { Github, Trash2, Minus, Database, Upload, Download, File, FileDown, Plus, X, Maximize2, Calculator, Save, LogOut, Sun, Moon, FileText, Calendar, Search, Check, Square, ImagePlus, FolderDown, FolderUp, Lock, Unlock, Cloud, LogIn, Loader2, FileSpreadsheet, Sparkles, Mic, MicOff, Palette, Settings, RotateCcw, FileJson, UploadCloud, RefreshCw, Eraser, ImageMinus, Paintbrush, ArrowDownAZ, ArrowUpAZ, CalendarDays, Type, CaseSensitive, RemoveFormatting, Eye, Monitor, Tag, Archive, FolderPlus, Share2, FolderOpen, Terminal, Copy, CheckCheck, Folder, User, Key, AlertTriangle, ArrowLeft, Edit, LayoutGrid, List, Smartphone, HardDrive, Menu, MoreVertical, ChevronRight, Info } from 'lucide-react';
-import jsPDF from 'jspdf';
-import { format } from 'date-fns';
-import { useFirebase } from '../hooks/useFirebase';
-import { auth, db } from '../lib/firebase';
-import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, type User as FirebaseUser, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { collection, writeBatch, doc, setDoc, getDocs, getDoc, deleteDoc, query, where } from 'firebase/firestore';
-import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
-import { GoogleGenAI } from '@google/genai';
+import { getRedirectResult } from 'firebase/auth';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { 
+  X, Lock, Unlock, Trash2, Edit, Plus, Search, FolderOpen, ChevronRight, 
+  Grid, List, Settings, LogOut, Cloud, Key, RefreshCw, FileText, Download, 
+  Upload, Copy, Check, Mic, MicOff, Play, Square, Save, Eye, EyeOff, Trash, 
+  Calculator, AlertTriangle, ArrowDownAZ, ArrowUpAZ, ArrowLeft, Calendar, 
+  CalendarDays, CaseSensitive, CheckCheck, Eraser, File, FileDown, FileJson, 
+  FileSpreadsheet, Folder, FolderDown, FolderUp, Github, LayoutGrid, Loader2, 
+  LogIn, Maximize2, Minus, Monitor, Moon, Paintbrush, Palette, RotateCcw, 
+  Smartphone, Sparkles, Sun, Tag, Terminal, Type, UploadCloud, User,
+  RemoveFormatting, Database, ImageMinus, ImagePlus, HardDrive
+} from 'lucide-react';
 
-type GridRow = {
-  id: string;
-  status?: string;
-  image?: string;
-  [key: string]: any;
+import { db, auth } from '../lib/firebase';
+import { 
+  doc, setDoc, getDoc, deleteDoc, getDocs, collection, query, where, onSnapshot 
+} from 'firebase/firestore';
+import { GoogleGenAI } from '@google/genai';
+import { Capacitor } from '@capacitor/core';
+import { Share } from '@capacitor/share';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { jsPDF } from 'jspdf';
+import { useFirebase } from '../hooks/useFirebase';
+
+const COLOR_THEMES = {
+  blue: {
+    50: '#eff6ff',
+    400: '#60a5fa',
+    500: '#3b82f6',
+    600: '#2563eb',
+    700: '#1d4ed8',
+  },
+  emerald: {
+    50: '#ecfdf5',
+    400: '#34d399',
+    500: '#10b981',
+    600: '#059669',
+    700: '#047857',
+  },
+  violet: {
+    50: '#f5f3ff',
+    400: '#a78bfa',
+    500: '#8b5cf6',
+    600: '#7c3aed',
+    700: '#6d28d9',
+  },
+  amber: {
+    50: '#fffbeb',
+    400: '#fbbf24',
+    500: '#f59e0b',
+    600: '#d97706',
+    700: '#b45309',
+  },
+  rose: {
+    50: '#fff1f2',
+    400: '#fb7185',
+    500: '#f43f5e',
+    600: '#e11d48',
+    700: '#be123c',
+  },
+  kontrast: {
+    50: '#fafafa',
+    400: '#a3a3a3',
+    500: '#737373',
+    600: '#525252',
+    700: '#262626',
+  }
 };
 
-type GridDocument = {
+export interface GridRow {
+  id: string;
+  status: 'none' | 'ok' | 'blue' | 'x';
+  image?: string;
+  col1?: string;
+  col2?: string;
+  col3?: string;
+  col4?: string;
+  [key: string]: any;
+}
+
+export interface GridDocument {
   id: string;
   title: string;
-  createdAt: string;
-  updatedAt: string;
   headers: string[];
   columnWidths?: number[];
   rows: GridRow[];
   tags?: string[];
-};
+  createdAt: string;
+  updatedAt: string;
+  userId?: string;
+}
 
-const COLOR_THEMES = {
-   blue: { 50: '#eff6ff', 400: '#60a5fa', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' },
-   green: { 50: '#ecfdf5', 400: '#34d399', 500: '#10b981', 600: '#059669', 700: '#047857' },
-   purple: { 50: '#faf5ff', 400: '#c084fc', 500: '#a855f7', 600: '#9333ea', 700: '#7e22ce' },
-   rose: { 50: '#fff1f2', 400: '#fb7185', 500: '#f43f5e', 600: '#e11d48', 700: '#be123c' },
-   indigo: { 50: '#eef2ff', 400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca' },
-   kontrast: { 50: '#f4f4f5', 400: '#d4d4d8', 500: '#71717a', 600: '#18181b', 700: '#000000' },
-};
 
-  const getActiveUid = () => {
-     return localStorage.getItem('grid_notepad_custom_uid') || (auth.currentUser ? auth.currentUser.uid : null);
-  };
-
-export const TAG_COLORS = [
-   { id: 'tag-red', color: '#ef4444', name: 'E Kuqe (Red)' },
-   { id: 'tag-orange', color: '#f97316', name: 'Portokalli (Orange)' },
-   { id: 'tag-amber', color: '#f59e0b', name: 'E Verdhë (Amber)' },
-   { id: 'tag-green', color: '#22c55e', name: 'E Gjelbër (Green)' },
-   { id: 'tag-emerald', color: '#10b981', name: 'Zmerald (Emerald)' },
-   { id: 'tag-teal', color: '#14b8a6', name: 'E Kaltër e Gjelbër (Teal)' },
-   { id: 'tag-cyan', color: '#06b6d4', name: 'Sian (Cyan)' },
-   { id: 'tag-blue', color: '#3b82f6', name: 'Blu (Blue)' },
-   { id: 'tag-indigo', color: '#6366f1', name: 'Indigo (Indigo)' },
-   { id: 'tag-violet', color: '#8b5cf6', name: 'Vjollcë (Violet)' },
-   { id: 'tag-purple', color: '#a855f7', name: 'Lejla (Purple)' },
-   { id: 'tag-pink', color: '#ec4899', name: 'Rozë (Pink)' },
-   { id: 'tag-rose', color: '#f43f5e', name: 'Trëndafil (Rose)' },
-   { id: 'tag-slate', color: '#64748b', name: 'Gri e Hirtë (Slate)' },
+const TEXT_COLORS = [
+  { id: "default", name: "Default" },
+  { id: "#ef4444", name: "Red" },
+  { id: "#f97316", name: "Orange" },
+  { id: "#eab308", name: "Yellow" },
+  { id: "#22c55e", name: "Green" },
+  { id: "#3b82f6", name: "Blue" },
+  { id: "#a855f7", name: "Purple" },
+  { id: "#ec4899", name: "Pink" },
 ];
 
-const CellInput = React.memo(({
-    initialValue,
-    onChange,
-    readOnly,
-    startHold,
-    stopHold,
-    className,
-    style,
-}: any) => {
-    const inputRef = useRef<HTMLTextAreaElement>(null);
+const TAG_COLORS = [
+  { id: "tag-red", color: "#ef4444", name: "Red" },
+  { id: "tag-orange", color: "#f97316", name: "Orange" },
+  { id: "tag-yellow", color: "#eab308", name: "Yellow" },
+  { id: "tag-green", color: "#22c55e", name: "Green" },
+  { id: "tag-blue", color: "#3b82f6", name: "Blue" },
+  { id: "tag-purple", color: "#a855f7", name: "Purple" },
+  { id: "tag-pink", color: "#ec4899", name: "Pink" },
+  { id: "tag-gray", color: "#71717a", name: "Gray" },
+];
 
-    useEffect(() => {
-        if (inputRef.current && document.activeElement !== inputRef.current) {
-            if (inputRef.current.value !== (initialValue || "")) {
-                inputRef.current.value = initialValue || "";
-            }
+interface HeaderInputProps {
+  initialValue: string;
+  onChange: (val: string) => void;
+  className?: string;
+  placeholder?: string;
+}
+
+function HeaderInput({ initialValue, onChange, className, placeholder }: HeaderInputProps) {
+  const [val, setVal] = React.useState(initialValue);
+  
+  React.useEffect(() => {
+    setVal(initialValue);
+  }, [initialValue]);
+
+  return (
+    <input
+      type="text"
+      value={val}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={() => onChange(val)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          onChange(val);
+          (e.target as HTMLInputElement).blur();
         }
-    }, [initialValue]);
+      }}
+      className={className}
+      placeholder={placeholder}
+    />
+  );
+}
 
-    const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        onChange(e.target.value);
-    };
+interface CellInputProps {
+  initialValue: string;
+  onChange: (val: string) => void;
+  readOnly?: boolean;
+  startHold?: () => void;
+  stopHold?: () => void;
+  className?: string;
+  style?: React.CSSProperties;
+}
 
-    return (
-        <textarea
-            ref={inputRef}
-            defaultValue={initialValue || ""}
-            onChange={handleChange}
-            onFocus={(e) => {
-                setTimeout(() => {
-                    const el = e.target;
-                    const rect = el.getBoundingClientRect();
-                    const viewHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-                    if (rect.bottom > viewHeight || rect.top < 0) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                }, 300);
-            }}
-            placeholder="..."
-            readOnly={readOnly}
-            onMouseDown={startHold}
-            onMouseUp={stopHold}
-            onMouseLeave={stopHold}
-            onTouchStart={startHold}
-            onTouchEnd={stopHold}
-            onTouchCancel={stopHold}
-            className={className}
-            style={style}
-            spellCheck={false}
-        />
-    );
-});
+function CellInput({ initialValue, onChange, readOnly, startHold, stopHold, className, style }: CellInputProps) {
+  const [val, setVal] = React.useState(initialValue || "");
 
-const HeaderInput = React.memo(({ initialValue, onChange, className, placeholder }: any) => {
-    const inputRef = useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    setVal(initialValue || "");
+  }, [initialValue]);
 
-    useEffect(() => {
-        if (inputRef.current && document.activeElement !== inputRef.current) {
-            if (inputRef.current.value !== (initialValue || "")) {
-                inputRef.current.value = initialValue || "";
-            }
-        }
-    }, [initialValue]);
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newVal = e.target.value;
+    setVal(newVal);
+    onChange(newVal);
+  };
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        onChange(e.target.value);
-    };
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (startHold) startHold();
+  };
 
-    return (
+  const handlePointerUp = () => {
+    if (stopHold) stopHold();
+  };
+
+  return (
+    <textarea
+      value={val}
+      onChange={handleChange}
+      readOnly={readOnly}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      className={className}
+      style={style}
+      rows={1}
+    />
+  );
+}
+
+
+interface TagInputProps {
+  tags: string[];
+  onChange: (tags: string[]) => void;
+  allAvailableTags: string[];
+  isDark?: boolean;
+  t?: (sq: string, en: string) => string;
+}
+
+function TagInput({ tags, onChange, allAvailableTags, isDark, t }: TagInputProps) {
+  const translate = t || ((sq: string, en: string) => sq);
+  const [input, setInput] = React.useState('');
+  const [showSuggestions, setShowSuggestions] = React.useState(false);
+
+  const handleAddTag = (tag: string) => {
+    const trimmed = tag.trim().toLowerCase();
+    if (trimmed && !tags.includes(trimmed)) {
+      onChange([...tags, trimmed]);
+    }
+    setInput('');
+    setShowSuggestions(false);
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    onChange(tags.filter(t => t !== tagToRemove));
+  };
+
+  const suggestions = allAvailableTags.filter(
+    tag => tag.toLowerCase().includes(input.toLowerCase()) && !tags.includes(tag)
+  );
+
+  return (
+    <div className="flex flex-col gap-1.5 relative w-full">
+      <div className="flex flex-wrap gap-1 items-center p-1.5 border rounded-lg bg-transparent min-h-[38px] border-zinc-500/10">
+        {tags.map(tag => (
+          <span
+            key={tag}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-blue-500/10 border border-blue-500/20 text-blue-500"
+          >
+            #{tag}
+            <button
+              type="button"
+              onClick={() => handleRemoveTag(tag)}
+              className="hover:text-red-500 font-bold ml-0.5 text-[10px]"
+            >
+              ×
+            </button>
+          </span>
+        ))}
         <input
-            ref={inputRef}
-            defaultValue={initialValue || ""}
-            onChange={handleChange}
-            onFocus={(e) => {
-                setTimeout(() => {
-                    const el = e.target;
-                    const rect = el.getBoundingClientRect();
-                    const viewHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-                    if (rect.bottom > viewHeight || rect.top < 0) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                }, 300);
-            }}
-            className={className}
-            placeholder={placeholder}
-            spellCheck={false}
+          type="text"
+          value={input}
+          onChange={e => {
+            setInput(e.target.value);
+            setShowSuggestions(true);
+          }}
+          onFocus={() => setShowSuggestions(true)}
+          onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ',') {
+              e.preventDefault();
+              if (input.trim()) handleAddTag(input);
+            }
+          }}
+          placeholder={translate("Shto etiketë...", "Add label...")}
+          className="flex-1 bg-transparent border-none outline-none text-xs min-w-[100px] p-0.5"
         />
-    );
-});
+      </div>
+      {showSuggestions && suggestions.length > 0 && (
+        <div className="absolute top-full left-0 right-0 mt-1 z-[150] max-h-40 overflow-y-auto rounded-lg shadow-xl border bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 p-1">
+          {suggestions.map(suggestion => (
+            <button
+              key={suggestion}
+              type="button"
+              onMouseDown={() => handleAddTag(suggestion)}
+              className="w-full text-left px-2 py-1 text-xs rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium"
+            >
+              #{suggestion}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
-export const getTagColors = (tag: string) => {
-   const hash = tag.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-   const colors = [
-      { bg: 'bg-red-500/10 text-red-600 border-red-500/25 dark:bg-red-500/25 dark:text-red-300 dark:border-red-500/30' },
-      { bg: 'bg-orange-500/10 text-orange-600 border-orange-500/25 dark:bg-orange-500/25 dark:text-orange-300 dark:border-orange-500/30' },
-      { bg: 'bg-amber-500/10 text-amber-600 border-amber-500/25 dark:bg-amber-500/25 dark:text-amber-300 dark:border-amber-500/30' },
-      { bg: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/25 dark:text-emerald-300 dark:border-emerald-500/30' },
-      { bg: 'bg-teal-500/10 text-teal-600 border-teal-500/25 dark:bg-teal-500/25 dark:text-teal-300 dark:border-teal-500/30' },
-      { bg: 'bg-cyan-500/10 text-cyan-600 border-cyan-500/25 dark:bg-cyan-500/25 dark:text-cyan-300 dark:border-cyan-500/30' },
-      { bg: 'bg-blue-500/10 text-blue-600 border-blue-500/25 dark:bg-blue-500/25 dark:text-blue-300 dark:border-blue-500/30' },
-      { bg: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/25 dark:bg-indigo-500/25 dark:text-indigo-300 dark:border-indigo-500/30' },
-      { bg: 'bg-violet-500/10 text-violet-600 border-violet-500/25 dark:bg-violet-500/25 dark:text-violet-300 dark:border-violet-500/30' },
-      { bg: 'bg-purple-500/10 text-purple-600 border-purple-500/25 dark:bg-purple-500/25 dark:text-purple-300 dark:border-purple-500/30' },
-      { bg: 'bg-pink-500/10 text-pink-600 border-pink-500/25 dark:bg-pink-500/25 dark:text-pink-300 dark:border-pink-500/30' },
-      { bg: 'bg-rose-500/10 text-rose-600 border-rose-500/25 dark:bg-rose-500/25 dark:text-rose-300 dark:border-rose-500/30' },
-   ];
-   return colors[hash % colors.length].bg;
+
+const format = (date: Date, formatStr: string) => {
+  const pad = (num: number) => String(num).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  const MM = pad(date.getMonth() + 1);
+  const dd = pad(date.getDate());
+  const HH = pad(date.getHours());
+  const mm = pad(date.getMinutes());
+  const ss = pad(date.getSeconds());
+
+  return formatStr
+    .replace('yyyy', String(yyyy))
+    .replace('MM', MM)
+    .replace('dd', dd)
+    .replace('HH', HH)
+    .replace('mm', mm)
+    .replace('ss', ss);
 };
 
-const TagInput = React.memo(({ tags, onChange, allAvailableTags, isDark, t }: {
-   tags: string[];
-   onChange: (newTags: string[]) => void;
-   allAvailableTags: string[];
-   isDark: boolean;
-   t: (sq: string, en: string) => string;
-}) => {
-   const [inputValue, setInputValue] = useState('');
-   const [showDropdown, setShowDropdown] = useState(false);
-   const containerRef = useRef<HTMLDivElement>(null);
-   const inputRef = useRef<HTMLInputElement>(null);
-
-   useEffect(() => {
-      const handleOutsideClick = (e: MouseEvent) => {
-         if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-            setShowDropdown(false);
-         }
-      };
-      document.addEventListener('mousedown', handleOutsideClick);
-      return () => document.removeEventListener('mousedown', handleOutsideClick);
-   }, []);
-
-   const addTag = (tag: string) => {
-      const clean = tag.trim().toLowerCase().replace(/#/g, '');
-      if (clean && !tags.includes(clean)) {
-         onChange([...tags, clean]);
-      }
-      setInputValue('');
-   };
-
-   const removeTag = (tagToRemove: string) => {
-      onChange(tags.filter(t => t !== tagToRemove));
-   };
-
-   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter' || e.key === ',') {
-         e.preventDefault();
-         if (inputValue.trim()) {
-            addTag(inputValue);
-         }
-      } else if (e.key === 'Backspace' && !inputValue && tags.length > 0) {
-         removeTag(tags[tags.length - 1]);
-      }
-   };
-
-   const filteredSuggestions = allAvailableTags
-      .filter(tag => !tags.includes(tag))
-      .filter(tag => tag.toLowerCase().includes(inputValue.toLowerCase()));
-
-   return (
-      <div ref={containerRef} className="relative w-full">
-         <div 
-            onClick={() => inputRef.current?.focus()}
-            className={`flex flex-wrap items-center gap-1 p-1 rounded border transition-all cursor-text min-h-[26px] ${
-               isDark 
-                  ? "bg-zinc-900 border-zinc-800 hover:border-zinc-700 focus-within:border-accent-500" 
-                  : "bg-white border-zinc-300 hover:border-zinc-400 focus-within:border-accent-500"
-            }`}
-         >
-            {tags.map(tag => (
-               <span 
-                  key={tag} 
-                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all ${getTagColors(tag)}`}
-               >
-                  #{tag}
-                  <button
-                     type="button"
-                     onClick={(e) => {
-                        e.stopPropagation();
-                        removeTag(tag);
-                     }}
-                     className="hover:bg-black/10 dark:hover:bg-white/10 p-0.5 rounded transition-colors"
-                  >
-                     <X className="w-2.5 h-2.5 stroke-[2]" />
-                  </button>
-               </span>
-            ))}
-            <input
-               ref={inputRef}
-               type="text"
-               value={inputValue}
-               onChange={(e) => {
-                  setInputValue(e.target.value);
-                  setShowDropdown(true);
-               }}
-               onFocus={() => setShowDropdown(true)}
-               onKeyDown={handleKeyDown}
-               className="flex-1 bg-transparent text-[10px] outline-none min-w-[50px] p-0 border-none focus:ring-0 placeholder-zinc-500 font-medium"
-               placeholder={tags.length === 0 ? t("Shto etiketë...", "Add tag...") : ""}
-            />
-         </div>
-
-         {showDropdown && (
-            <div className={`absolute left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto rounded-lg border shadow-xl z-[150] p-1 flex flex-col gap-0.5 ${
-               isDark ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-zinc-200 text-zinc-900"
-            }`}>
-               {inputValue.trim() && !tags.includes(inputValue.trim().toLowerCase().replace(/#/g, '')) && (
-                  <button
-                     type="button"
-                     onClick={() => addTag(inputValue)}
-                     className={`flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-left rounded transition-colors w-full ${
-                        isDark ? "hover:bg-zinc-800/60 text-accent-400" : "hover:bg-zinc-50 text-accent-600"
-                     }`}
-                  >
-                     <Plus className="w-3 h-3" />
-                     {t(`Krijo: "${inputValue}"`, `Create: "${inputValue}"`)}
-                  </button>
-               )}
-
-               {filteredSuggestions.length > 0 ? (
-                  <>
-                     <div className={`px-2 py-0.5 text-[8px] font-bold uppercase tracking-wider ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>
-                        {t("Zgjidh ekzistuese", "Select existing")}
-                     </div>
-                     <div className="flex flex-col gap-0.5 max-h-32 overflow-y-auto">
-                        {filteredSuggestions.map(tag => (
-                           <button
-                              key={tag}
-                              type="button"
-                              onClick={() => addTag(tag)}
-                              className={`flex items-center justify-between px-2 py-1 rounded text-[10px] font-bold text-left transition-all ${getTagColors(tag)}`}
-                           >
-                              <span>#{tag}</span>
-                              <Plus className="w-2.5 h-2.5 opacity-60" />
-                           </button>
-                        ))}
-                     </div>
-                  </>
-               ) : (
-                  !inputValue.trim() && (
-                     <div className={`p-2 text-center text-[9px] ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>
-                        {t("Nuk ka etiketa të tjera", "No other tags")}
-                     </div>
-                  )
-               )}
-            </div>
-         )}
-      </div>
-   );
-});
-
 export function Notepad() {
-  const [documents, setDocuments] = useState<GridDocument[]>([]);
-  const [activeDocId, setActiveDocId] = useState<string | null>(null);
-  const activeDocIdRef = useRef<string | null>(null);
-  useEffect(() => { activeDocIdRef.current = activeDocId; }, [activeDocId]);
-  const [isDark, setIsDark] = useState(true);
-  
-  const [viewportHeight, setViewportHeight] = useState('100dvh');
+  const { 
+    user, loading, 
+    loginWithGoogle: hookGoogleLogin, 
+    loginWithEmail: hookEmailLogin, 
+    registerWithEmail: hookEmailRegister, 
+    loginAnonymously: hookAnonymousLogin, 
+    logout: hookLogout, 
+    resetPassword: hookResetPassword 
+  } = useFirebase();
+  // Additional missing online, cloud, and UI states
+  const [selectedOnlineDoc, setSelectedOnlineDoc] = React.useState<GridDocument | null>(null);
+  const [isOnlineEditing, setIsOnlineEditing] = React.useState<boolean>(false);
+  const [gistToken, setGistToken] = React.useState<string>(() => localStorage.getItem('grid_notepad_gist_token') || '');
+  const [gistId, setGistId] = React.useState<string>(() => localStorage.getItem('grid_notepad_gist_id') || '');
+  const [gistViewerModal, setGistViewerModal] = React.useState<boolean>(false);
+  const [gistViewerContent, setGistViewerContent] = React.useState<string | null>(null);
 
-  const [accentColor, setAccentColor] = useState<keyof typeof COLOR_THEMES>('blue');
-  const [showThemeMenu, setShowThemeMenu] = useState(false);
-  const [showOptionsMenu, setShowOptionsMenu] = useState(false);
-  
-  const [themeSync, setThemeSync] = useState(() => {
-      return localStorage.getItem('grid_theme_sync') === 'true';
-  });
-  
-  const [cloudSyncFrequency, setCloudSyncFrequency] = useState<number>(() => {
-      const saved = localStorage.getItem('grid_cloud_sync_freq');
-      return saved ? parseInt(saved, 10) : 5000;
-  });
-  
-  const [language, setLanguage] = useState<'sq' | 'en'>(() => (localStorage.getItem('grid_lang') as any) || 'sq');
-  const t = (sq: string, en: string) => language === 'en' ? en : sq;
-  
-  const [downloadMethod, setDownloadMethod] = useState<'auto'|'picker'|'share'|'direct'|'folder'>(() => {
-      return (localStorage.getItem('grid_download_method') as any) || 'folder';
-  });
-  
-  const [folderName, setFolderName] = useState<string>(() => {
-      return localStorage.getItem('grid_mock_folder') || '';
-  });
-  const [androidBaseDir, setAndroidBaseDir] = useState<string>(() => {
-      return localStorage.getItem('grid_android_base_dir') || 'Memoria e Telefonit';
-  });
+  const [onlineBlueText, setOnlineBlueText] = React.useState<string>('');
+  const [onlineSecretList, setOnlineSecretList] = React.useState<any[]>([]);
 
-  // Storage Picker states for the SAF File Explorer
-  const [showStoragePickerModal, setShowStoragePickerModal] = useState<boolean>(false);
-  const [activeProvider, setActiveProvider] = useState<string>(() => {
-      return localStorage.getItem('grid_android_base_dir') || 'Memoria e Telefonit';
-  });
-  const [currentPath, setCurrentPath] = useState<string[]>([]);
-  const [storageSearchQuery, setStorageSearchQuery] = useState<string>('');
-  const [showStorageSidebar, setShowStorageSidebar] = useState<boolean>(false);
-  const [newFolderInputName, setNewFolderInputName] = useState<string>('');
+  const [cloudModal, setCloudModal] = React.useState<boolean>(false);
+  const [cloudDocToDelete, setCloudDocToDelete] = React.useState<GridDocument | null>(null);
+  const [showCloudSelectionModal, setShowCloudSelectionModal] = React.useState<boolean>(false);
 
-  const [simulatedFilesystem, setSimulatedFilesystem] = useState<Record<string, { name: string; type: 'folder' | 'file'; size?: string; date?: string; }[]>>(() => {
-      const saved = localStorage.getItem('grid_simulated_fs');
-      if (saved) {
-          try { return JSON.parse(saved); } catch(e) {}
+  const [showDownloadAppModal, setShowDownloadAppModal] = React.useState<boolean>(false);
+  const [downloadActiveTab, setDownloadActiveTab] = React.useState<'pwa' | 'apk' | 'github'>('pwa');
+
+  const [appLocked, setAppLocked] = React.useState<boolean>(() => !!localStorage.getItem('grid_notepad_pin'));
+  const [appLockInput, setAppLockInput] = React.useState<string>('');
+
+  const [onlineView, setOnlineView] = React.useState<'cloud' | 'gist' | null>(null);
+  const [showOptionsMenu, setShowOptionsMenu] = React.useState<boolean>(false);
+  const [cloudSyncFrequency, setCloudSyncFrequency] = React.useState<number>(() => parseInt(localStorage.getItem('grid_cloud_sync_freq') || '5000'));
+
+  const [activeProvider, setActiveProvider] = React.useState<string>('local');
+  const [currentPath, setCurrentPath] = React.useState<string[]>([]);
+  const [showStoragePickerModal, setShowStoragePickerModal] = React.useState<boolean>(false);
+  const [showStorageSidebar, setShowStorageSidebar] = React.useState<boolean>(false);
+  const [androidBaseDir, setAndroidBaseDir] = React.useState<string>(() => localStorage.getItem('grid_android_base_dir') || '');
+  const [folderName, setFolderName] = React.useState<string>(() => localStorage.getItem('grid_folder_name') || '');
+  const [downloadMethod, setDownloadMethod] = React.useState<'prompt' | 'directory'>('prompt');
+  const [saveDirectoryHandle, setSaveDirectoryHandle] = React.useState<any>(null);
+
+  const [backupModal, setBackupModal] = React.useState<boolean>(false);
+  const [mainTab, setMainTab] = React.useState<'lista' | 'etiketa'>('lista');
+  const [catalogSearch, setCatalogSearch] = React.useState<string>('');
+  const [selectedTag, setSelectedTag] = React.useState<string | null>(null);
+  const [transferDocId, setTransferDocId] = React.useState<string | null>(null);
+  const [docToDelete, setDocToDelete] = React.useState<string | null>(null);
+
+
+
+  const getTagColors = (tagName: string) => {
+    const colors = [
+      'bg-red-500/10 border-red-500/30 text-red-500',
+      'bg-orange-500/10 border-orange-500/30 text-orange-500',
+      'bg-yellow-500/10 border-yellow-500/30 text-yellow-500',
+      'bg-green-500/10 border-green-500/30 text-green-500',
+      'bg-blue-500/10 border-blue-500/30 text-blue-500',
+      'bg-purple-500/10 border-purple-500/30 text-purple-500',
+      'bg-pink-500/10 border-pink-500/30 text-pink-500',
+      'bg-zinc-500/10 border-zinc-500/30 text-zinc-500',
+    ];
+    let hash = 0;
+    for (let i = 0; i < tagName.length; i++) {
+      hash = tagName.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const index = Math.abs(hash) % colors.length;
+    return colors[index];
+  };
+
+  const handleAddCustomLabel = () => {
+    const newName = prompt(t("Shkruani emrin e etiketës së re:", "Enter the name of the new label:"));
+    if (newName && newName.trim()) {
+      const trimmed = newName.trim();
+      if (customLabels.includes(trimmed)) {
+        showToast(t("Kjo etiketë ekziston tashmë!", "This label already exists!"));
+        return;
       }
-      return {
-          'Memoria e Telefonit': [
-              { name: '.aide', type: 'folder' },
-              { name: '.sketchware', type: 'folder' },
-              { name: '.wallpaper', type: 'folder' },
-              { name: '1 MUSIC-GU player', type: 'folder' },
-              { name: 'A DELTIO APOSTOLIS', type: 'folder' },
-              { name: 'DOKUMENTET', type: 'folder' },
-              { name: 'Blloku', type: 'folder' },
-              { name: 'Shënime', type: 'folder' },
-              { name: 'Documents', type: 'folder' },
-              { name: 'Downloads', type: 'folder' }
-          ],
-          'Memoria e Telefonit/DOKUMENTET': [
-              { name: '2025 Elga', type: 'folder' },
-              { name: 'BLLOKU SHENIMEVE', type: 'folder' },
-              { name: 'OAED', type: 'folder' },
-              { name: 'PAGESA 2024 TOKAT', type: 'folder' },
-              { name: 'QERA SHTEPIE', type: 'folder' },
-              { name: 'ZETORI FIAT SERVIS', type: 'folder' },
-              { name: '238029411.txt', type: 'file', size: '9 B', date: '10 Apr 2024' },
-              { name: '3 7 8 12.txt', type: 'file', size: '39 B', date: '2 Jun 2024' }
-          ],
-          'Memoria e Telefonit/DOKUMENTET/BLLOKU SHENIMEVE': [
-              { name: 'shenimet_e_mia.txt', type: 'file', size: '1.2 KB', date: '25 Jul 2026' }
-          ],
-          'Kartela SD': [
-              { name: 'DCIM', type: 'folder' },
-              { name: 'Music', type: 'folder' },
-              { name: 'Android', type: 'folder' },
-              { name: 'Backup', type: 'folder' }
-          ],
-          'Ruajtja e Jashtme': [
-              { name: 'home', type: 'folder' },
-              { name: 'usr', type: 'folder' }
-          ]
-      };
+      const updated = [...customLabels, trimmed];
+      saveCustomLabels(updated);
+      showToast(t("Etiketa u shtua me sukses!", "Label added successfully!"));
+    }
+  };
+
+  const viewGistContent = async (gistIdOverride?: string) => {
+    const gId = gistIdOverride || gistId || localStorage.getItem('grid_notepad_gist_id');
+    if (!gId) {
+      showToast("Nuk ka Gist ID. Ruani një herë dokumentet fillimisht.");
+      return;
+    }
+    showToast("Duke hapur dokumentin Gist...");
+    try {
+      const res = await fetch(`https://api.github.com/gists/${gId}`, {
+        headers: gistToken ? {
+          'Authorization': `token ${gistToken}`,
+          'Accept': 'application/vnd.github.v3+json'
+        } : undefined
+      });
+      if (!res.ok) throw new Error("Gabim gjatë ngarkimit. Gist ID i pavlefshëm.");
+      const data = await res.json();
+      const file = data.files['grid_notepad_backup.json'];
+      if (!file) throw new Error("Skedari nuk u gjet në këtë Gist.");
+      
+      const content = file.truncated ? await (await fetch(file.raw_url)).text() : file.content;
+      setGistViewerContent(content);
+      setGistViewerModal(true);
+    } catch (err: any) {
+      showToast(err.message);
+    }
+  };
+
+  // Remaining states and handlers from full app scope
+  const [isOnlineAiThinking, setIsOnlineAiThinking] = React.useState<boolean>(false);
+  const [onlineDashboardTab, setOnlineDashboardTab] = React.useState<'lists' | 'notes' | 'secrets'>('lists');
+  const [secureLogoutModal, setSecureLogoutModal] = React.useState<boolean>(false);
+  const [secureLogoutPasswordInput, setSecureLogoutPasswordInput] = React.useState<string>('');
+  
+  const [simulatedFilesystem, setSimulatedFilesystem] = React.useState<Record<string, any[]>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('grid_simulated_fs') || '{}');
+    } catch {
+      return {};
+    }
   });
 
-  useEffect(() => {
-      localStorage.setItem('grid_simulated_fs', JSON.stringify(simulatedFilesystem));
+  React.useEffect(() => {
+    localStorage.setItem('grid_simulated_fs', JSON.stringify(simulatedFilesystem));
   }, [simulatedFilesystem]);
 
-  const addFileToSimulatedFilesystem = (filename: string, blobSize: number) => {
-      const baseDir = androidBaseDir || localStorage.getItem('grid_android_base_dir') || 'Memoria e Telefonit';
-      const mockFolder = folderName || localStorage.getItem('grid_mock_folder') || '';
-      const folderKey = baseDir + (mockFolder ? '/' + mockFolder : '');
-      
-      let sizeStr = '0 B';
-      if (blobSize > 1024 * 1024) {
-          sizeStr = (blobSize / (1024 * 1024)).toFixed(1) + ' MB';
-      } else if (blobSize > 1024) {
-          sizeStr = (blobSize / 1024).toFixed(1) + ' KB';
-      } else {
-          sizeStr = blobSize + ' B';
+  const [storageSearchQuery, setStorageSearchQuery] = React.useState<string>('');
+  const [newFolderInputName, setNewFolderInputName] = React.useState<string>('');
+
+  const [activeSecretId, setActiveSecretId] = React.useState<string | null>(null);
+  const [secretSearchQuery, setSecretSearchQuery] = React.useState<string>('');
+
+  const [passwordModal, setPasswordModal] = React.useState<boolean>(false);
+  const [passwordInput, setPasswordInput] = React.useState<string>('');
+
+  const [aiAutopilot, setAiAutopilot] = React.useState<boolean>(() => localStorage.getItem('grid_ai_autopilot') === 'true');
+  const [isAiAutopilotRunning, setIsAiAutopilotRunning] = React.useState<boolean>(false);
+
+  const [githubUser, setGithubUser] = React.useState<any>(null);
+  const [tempGistToken, setTempGistToken] = React.useState<string>('');
+
+  const openGistDashboard = () => {
+    setOnlineView('gist');
+    setOnlineDashboardTab('lists');
+  };
+
+  const saveToGist = async (docsOverride?: any, isSilent = false, blueTextOverride?: string, secretListOverride?: any[]) => {
+      const token = gistToken || localStorage.getItem('grid_notepad_gist_token');
+      if (!token) {
+        if (!isSilent) showToast("Ju lutem vendosni një GitHub Token");
+        return false;
       }
-      
-      const dateStr = new Date().toLocaleDateString('sq-AL', { day: 'numeric', month: 'short', year: 'numeric' });
-      
-      setSimulatedFilesystem(prev => {
-          const next = { ...prev };
-          if (!next[folderKey]) {
-              next[folderKey] = [];
-          }
-          
-          const items = next[folderKey];
-          if (items.some(item => item.name === filename && item.type === 'file')) {
-              return prev;
-          }
-          
-          next[folderKey] = [
-              ...items,
-              { name: filename, type: 'file', size: sizeStr, date: dateStr }
-          ];
-          
-          localStorage.setItem('grid_simulated_fs', JSON.stringify(next));
-          return next;
-      });
-  };
-
-  const getCapacitorDirectory = (dirStr: string) => {
-      switch (dirStr) {
-          case 'Cache': return Directory.Cache;
-          case 'Data': return Directory.Data;
-          case 'ExternalStorage': return Directory.ExternalStorage;
-          case 'Documents':
-          default:
-              return Directory.Documents;
-      }
-  };
-  
-  useEffect(() => {
-     getDirectoryHandle().then(handle => {
-         if (handle) {
-             setFolderName(handle.name);
-             localStorage.setItem('grid_mock_folder', handle.name);
-         } else {
-             const mock = localStorage.getItem('grid_mock_folder');
-             if (mock) setFolderName(mock);
-         }
-     });
-  }, []);
-
-  const [textSize, setTextSize] = useState<number>(() => {
-      const val = parseInt(localStorage.getItem('grid_text_size') || '12', 10);
-      return isNaN(val) ? 12 : val;
-  });
-  const [textWeight, setTextWeight] = useState<number>(() => {
-      const saved = localStorage.getItem('grid_text_weight');
-      if (saved === 'bold') return 700;
-      if (saved === 'normal') return 400;
-      const val = parseInt(saved || '400', 10);
-      return isNaN(val) ? 400 : val;
-  });
-  const [textColorMode, setTextColorMode] = useState<string>(() => localStorage.getItem('grid_text_color') || 'default');
-  const [showTextMenu, setShowTextMenu] = useState(false);
-  const [showTextColorMenu, setShowTextColorMenu] = useState(false);
-  const [showTagColorMenu, setShowTagColorMenu] = useState(false);
-
-  const updateTextSize = (val: number) => {
-      setTextSize(val);
-      localStorage.setItem('grid_text_size', val.toString());
-  };
-  const updateTextWeight = (val: number) => {
-      setTextWeight(val);
-      localStorage.setItem('grid_text_weight', val.toString());
-  };
-  const updateTextColorMode = (val: string) => {
-      setTextColorMode(val);
-      localStorage.setItem('grid_text_color', val);
-  };
-
-  const getActualTextColor = (colorId: string) => {
-      if (colorId === 'default') return undefined;
-      if (isDark && colorId === '#000000') return '#ffffff';
-      if (!isDark && colorId === '#ffffff') return '#000000';
-      return colorId;
-  };
-
-  const TEXT_COLORS = [
-    { id: 'default', color: 'bg-zinc-500', name: t('Standard', 'Standard') },
-    { id: '#000000', color: 'bg-black', name: t('E Zezë', 'Black') },
-    { id: '#ffffff', color: 'bg-white', name: t('E Bardhë', 'White') },
-    { id: '#ff0000', color: 'bg-red-600', name: t('E Kuqe', 'Red') },
-    { id: '#0044ff', color: 'bg-blue-600', name: t('Blu', 'Blue') },
-    { id: '#00cc44', color: 'bg-green-600', name: t('E Gjelbër', 'Green') },
-    { id: '#ffcc00', color: 'bg-yellow-500', name: t('E Verdhë', 'Yellow') },
-    { id: '#aa00ff', color: 'bg-purple-600', name: t('Vjollcë', 'Purple') },
-    { id: '#ff5500', color: 'bg-orange-600', name: t('Portokalli', 'Orange') },
-    { id: '#ff00aa', color: 'bg-pink-600', name: t('Rozë', 'Pink') },
-  ];
-  
-  // Active document state
-  const [title, setTitle] = useState(t('Shënim i Paemërtuar', 'Untitled Note'));
-  const [activeTags, setActiveTags] = useState<string[]>([]);
-  const [rows, setRows] = useState<GridRow[]>([]);
-  const [columnWidths, setColumnWidths] = useState<number[]>([]);
-  const [headers, setHeaders] = useState([t('Kolona 1', 'Column 1'), t('Kolona 2', 'Column 2'), t('Kolona 3', 'Column 3'), t('Kolona 4', 'Column 4')]);
-  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
-  const [showConfirmDeleteSelected, setShowConfirmDeleteSelected] = useState(false);
-  
-  const [currentDateTime, setCurrentDateTime] = useState(new Date());
-
-  useEffect(() => {
-     if (activeDocId) {
-         const timer = setInterval(() => setCurrentDateTime(new Date()), 1000);
-         return () => clearInterval(timer);
-     }
-  }, [activeDocId]);
-
-  const getAlbanianDateTime = () => {
-      const d = currentDateTime;
-      const dName = [t('E Diel', 'Sun'), t('E Hënë', 'Mon'), t('E Martë', 'Tue'), t('E Mërkurë', 'Wed'), t('E Enjte', 'Thu'), t('E Premte', 'Fri'), t('E Shtunë', 'Sat')][d.getDay()];
-      const day = d.getDate().toString().padStart(2, '0');
-      const month = [t('Jan', 'Jan'), t('Shk', 'Feb'), t('Mar', 'Mar'), t('Pri', 'Apr'), t('Maj', 'May'), t('Qer', 'Jun'), t('Korr', 'Jul'), t('Gus', 'Aug'), t('Sht', 'Sep'), t('Tet', 'Oct'), t('Nën', 'Nov'), t('Dhj', 'Dec')][d.getMonth()];
-      const year = d.getFullYear();
-      const time = d.toLocaleTimeString(language === 'en' ? 'en-US' : 'sq-AL', { hour: '2-digit', minute: '2-digit', hour12: false });
-      return `${dName} ${day}-${month}-${year} ${time}`;
-  };
-
-  const [activeCell, setActiveCell] = useState<{rIndex: number, colKey: string} | null>(null);
-  const [modalText, setModalText] = useState('');
-  const [previewSelectedRows, setPreviewSelectedRows] = useState(false);
-
-  const [showCalculator, setShowCalculator] = useState(false);
-  const [calcPos, setCalcPos] = useState({ x: 20, y: 120 });
-  const [isDraggingCalc, setIsDraggingCalc] = useState(false);
-  const [calcDisplay, setCalcDisplay] = useState('0');
-  const dragRef = useRef<{startX: number, startY: number, initialX: number, initialY: number} | null>(null);
-
-  const handleCalcInput = (key: string) => {
-      if (key === 'C') {
-          setCalcDisplay('0');
-      } else if (key === '=') {
-          try {
-              const sanitized = calcDisplay.replace(/x/g, '*').replace(/÷/g, '/');
-              const res = new Function(`return ${sanitized}`)();
-              setCalcDisplay(String(Number(res.toFixed(4))));
-          } catch {
-              setCalcDisplay('Gabim');
-          }
-      } else {
-          setCalcDisplay(prev => prev === '0' || prev === 'Gabim' ? key : prev + key);
-      }
-  };
-
-  const handleCalcPointerDown = (e: React.PointerEvent) => {
-      setIsDraggingCalc(true);
-      dragRef.current = {
-          startX: e.clientX,
-          startY: e.clientY,
-          initialX: calcPos.x,
-          initialY: calcPos.y
-      };
-      e.currentTarget.setPointerCapture(e.pointerId);
-  };
-
-  const handleCalcPointerMove = (e: React.PointerEvent) => {
-      if (!isDraggingCalc || !dragRef.current) return;
-      e.preventDefault();
-      const dx = e.clientX - dragRef.current.startX;
-      const dy = e.clientY - dragRef.current.startY;
-      setCalcPos({ x: dragRef.current.initialX + dx, y: dragRef.current.initialY + dy });
-  };
-
-  const handleCalcPointerUp = (e: React.PointerEvent) => {
-      setIsDraggingCalc(false);
-      dragRef.current = null;
-      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch(err){}
-  };
-  
-  const cellHoldRef = useRef<NodeJS.Timeout | null>(null);
-
-  const handleCellHoldStart = (rIndex: number, colKey: string) => {
-      if (cellHoldRef.current) clearTimeout(cellHoldRef.current);
-      cellHoldRef.current = setTimeout(() => {
-          openModal(rIndex, colKey);
-          cellHoldRef.current = null;
-      }, 3000); // 3 seconds per user request
-  };
-  const handleCellHoldCancel = () => {
-      if (cellHoldRef.current) {
-         clearTimeout(cellHoldRef.current);
-         cellHoldRef.current = null;
-      }
-  };
-
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const pressTimers = useRef<{ [key: number]: ReturnType<typeof setTimeout> }>({});
-  const isLongPress = useRef<{ [key: number]: boolean }>({});
-  
-  const [toastMessage, setToastMessage] = useState('');
-  const [showConfirmClose, setShowConfirmClose] = useState(false);
-  const [showConfirmClear, setShowConfirmClear] = useState(false);
-  
-  const [catalogSearch, setCatalogSearch] = useState('');
-  const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  
-  const allAvailableTags = Array.from(new Set(documents.flatMap(doc => doc.tags || []))).sort();
-  const [docSearch, setDocSearch] = useState('');
-  const [docToDelete, setDocToDelete] = useState<string | null>(null);
-  
-  
-  const [isSaving, setIsSaving] = useState(false);
-  const [autoSaveMsg, setAutoSaveMsg] = useState('');
-  const autoSaveTimeout = useRef<NodeJS.Timeout | null>(null);
-  const localSaveTimeout = useRef<NodeJS.Timeout | null>(null);
-  const latestDocsRef = useRef<GridDocument[]>([]);
-  const pendingLocalSaveRef = useRef<boolean>(false);
-
-  const [passwordModal, setPasswordModal] = useState<{ isOpen: boolean; action: (() => void) | null; type: 'setup' | 'verify' }>({ isOpen: false, action: null, type: 'verify' });
-  const [passwordInput, setPasswordInput] = useState('');
-  const [recoveryEmail, setRecoveryEmail] = useState<string>(() => {
-      return localStorage.getItem('grid_notepad_recovery_email') || '';
-  });
-  
-  const [activeSecretId, setActiveSecretId] = useState<string | null>(null);
-  const [secretSearchQuery, setSecretSearchQuery] = useState('');
-  
-  const [appLocked, setAppLocked] = useState(false);
-  const [appLockInput, setAppLockInput] = useState('');
-
-  const [authModal, setAuthModal] = useState(false);
-  const [authError, setAuthError] = useState<{ code: string; message: string; provider: string } | null>(null);
-  const [resetSent, setResetSent] = useState(false);
-
-  useEffect(() => {
-    if (authModal) {
-      setAuthError(null);
-      setResetSent(false);
-    }
-  }, [authModal]);
-  const { user, loading, loginWithGoogle: hookGoogleLogin, loginWithEmail: hookEmailLogin, registerWithEmail: hookEmailRegister, loginAnonymously: hookAnonymousLogin, logout: hookLogout, resetPassword: hookResetPassword } = useFirebase();
-  const [email, setEmail] = useState(() => localStorage.getItem('grid_notepad_saved_email') || '');
-  const [password, setPassword] = useState('');
-  const [isSignUp, setIsSignUp] = useState(false);
-
-  const [cloudModal, setCloudModal] = useState(false);
-  const [cloudDocToDelete, setCloudDocToDelete] = useState<any>(null);
-  const [backupModal, setBackupModal] = useState(false);
-  const [gistToken, setGistToken] = useState(localStorage.getItem('grid_notepad_gist_token') || '');
-  const [tempGistToken, setTempGistToken] = useState(gistToken);
-  const [gistId, setGistId] = useState(localStorage.getItem('grid_notepad_gist_id') || '');
-  const [tempGistId, setTempGistId] = useState(gistId);
-  const [aiAutopilot, setAiAutopilot] = useState<boolean>(() => localStorage.getItem('grid_ai_autopilot') !== 'false');
-  const [isAiAutopilotRunning, setIsAiAutopilotRunning] = useState(false);
-  const [gistViewerModal, setGistViewerModal] = useState(false);
-  const [gistViewerContent, setGistViewerContent] = useState<string | null>(null);
-  
-  const [showCloudDropdown, setShowCloudDropdown] = useState(false);
-  const [showOnlineSettingsMenu, setShowOnlineSettingsMenu] = useState(false);
-  const [showGistSettings, setShowGistSettings] = useState(false);
-  const [showCloudSettingsState, setShowCloudSettingsState] = useState(false);
-  const [onlineView, setOnlineView] = useState<'cloud' | 'gist' | null>(null);
-  const [showCloudButtonMenu, setShowCloudButtonMenu] = useState(false);
-  const [showCloudSelectionModal, setShowCloudSelectionModal] = useState(false);
-  
-  const [showDownloadAppModal, setShowDownloadAppModal] = useState(false);
-  const [downloadActiveTab, setDownloadActiveTab] = useState<'pwa' | 'apk' | 'github'>('pwa');
-
-  const [githubUser, setGithubUser] = useState<{ login: string; avatar_url: string; name?: string } | null>(() => {
-     try {
-        const saved = localStorage.getItem('grid_notepad_github_user');
-        return saved ? JSON.parse(saved) : null;
-     } catch(e) { return null; }
-  });
-
-  useEffect(() => {
-     if (gistToken) {
-        const fetchGithubUser = async () => {
-           try {
-              const res = await fetch('https://api.github.com/user', {
-                 headers: {
-                    'Authorization': `token ${gistToken}`,
-                    'Accept': 'application/vnd.github.v3+json'
-                 }
-              });
-              if (res.ok) {
-                 const data = await res.json();
-                 const userObj = { login: data.login, avatar_url: data.avatar_url, name: data.name };
-                 setGithubUser(userObj);
-                 localStorage.setItem('grid_notepad_github_user', JSON.stringify(userObj));
-              }
-           } catch (e) {}
-        };
-        fetchGithubUser();
-     } else {
-        setGithubUser(null);
-        localStorage.removeItem('grid_notepad_github_user');
-     }
-  }, [gistToken]);
-
-  const [selectedOnlineDoc, setSelectedOnlineDoc] = useState<GridDocument | null>(null);
-  const [isOnlineEditing, setIsOnlineEditing] = useState(false);
-  const [isOnlineAiThinking, setIsOnlineAiThinking] = useState(false);
-  const [onlineSearch, setOnlineSearch] = useState('');
-  const [onlineDashboardTab, setOnlineDashboardTab] = useState<'lists' | 'notes' | 'secrets'>('lists');
-  const [onlineBlueText, setOnlineBlueText] = useState('');
-  const [onlineSecretList, setOnlineSecretList] = useState<{id: string, text: string, done: boolean}[]>([]);
-  const [secureLogoutModal, setSecureLogoutModal] = useState<{
-    isOpen: boolean;
-    target: 'cloud' | 'gist' | null;
-    onSuccess: (() => void) | null;
-  }>({ isOpen: false, target: null, onSuccess: null });
-  const [secureLogoutPasswordInput, setSecureLogoutPasswordInput] = useState('');
-  const [logoutInfoModal, setLogoutInfoModal] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-  } | null>(null);
-  const isGistSyncingRef = useRef(false);
-
-  const saveToGist = async (docsToSave: GridDocument[] = documents, silent = false, blueTextToSave?: string, secretListToSave?: any[]) => {
-      if (!gistToken) {
-         if (!silent) showToast("Ju lutem vendosni një GitHub Token");
-         return;
-      }
-      const isGView = onlineView === 'gist';
-      const finalBlueText = blueTextToSave !== undefined ? blueTextToSave : (isGView ? onlineBlueText : blueText);
-      const finalSecretList = secretListToSave !== undefined ? secretListToSave : (isGView ? onlineSecretList : secretList);
-
-      if (!silent) showToast("Duke ruajtur në GitHub Gist...");
+      if (!isSilent) showToast("Duke ruajtur në GitHub Gist...");
       try {
-          const contentObj = {
-             documents: docsToSave,
-             blueText: finalBlueText,
-             secretList: finalSecretList
+          const docsToBackup = docsOverride || documents;
+          const finalBlueText = blueTextOverride !== undefined ? blueTextOverride : onlineBlueText;
+          const finalSecretList = secretListOverride !== undefined ? secretListOverride : onlineSecretList;
+          const backupData = {
+            documents: docsToBackup,
+            blueText: finalBlueText,
+            secretList: finalSecretList
           };
-          const content = JSON.stringify(contentObj);
-          if (isGView) {
-             setGistViewerContent(content);
-          }
-          
-          // Generate a beautiful human-readable markdown notebook representation
-          let mdContent = `# 📔 MANUAL NOTEBOOK - GIST CLOUD BACKUP\n\n`;
-          mdContent += `*Ky skedar përmban të gjitha shënimet tuaja të sinkronizuara manualisht ose automatikisht në Gist Cloud.*\n`;
-          mdContent += `*Përditësuar më: ${new Date().toLocaleString('sq-AL')}*\n\n---\n\n`;
-
-          // Add BlueText/Notes to markdown
-          mdContent += `## 📝 SHËNIMET ME TEKST (NOTES)\n\n`;
-          if (finalBlueText) {
-             mdContent += `${finalBlueText}\n\n`;
-          } else {
-             mdContent += `*Nuk ka shënime me tekst.*\n\n`;
-          }
-          mdContent += `\n---\n\n`;
-
-          // Add SecretList to markdown
-          mdContent += `## 🔒 LISTA E SEKRETEVE (SECRETS)\n\n`;
-          if (finalSecretList && finalSecretList.length > 0) {
-             finalSecretList.forEach((secretItem, idx) => {
-                if (secretItem.name !== undefined) {
-                   mdContent += `### 📁 ${secretItem.name}\n${secretItem.content || '*Bllok i zbrazët*'}\n\n`;
-                } else {
-                   const check = secretItem.done ? '[x]' : '[ ]';
-                   mdContent += `- ${check} ${secretItem.text || 'Element i paemërtuar'}\n`;
-                }
-             });
-          } else {
-             mdContent += `*Nuk ka sekrete në listë.*\n\n`;
-          }
-          mdContent += `\n---\n\n`;
-
-          mdContent += `## 📄 LISTAT E TABELAVE (TABLE DOCUMENTS)\n\n`;
-          docsToSave.forEach((docItem, index) => {
-             mdContent += `### ${index + 1}. 📄 ${docItem.title || 'Dokument i Paemërtuar'}\n`;
-             mdContent += `- **Krijuar më:** ${docItem.createdAt ? new Date(docItem.createdAt).toLocaleString('sq-AL') : 'N/A'}\n`;
-             mdContent += `- **Përditësuar më:** ${docItem.updatedAt ? new Date(docItem.updatedAt).toLocaleString('sq-AL') : 'N/A'}\n`;
-             if (docItem.tags && docItem.tags.length > 0) {
-                mdContent += `- **Etiketat:** ${docItem.tags.map(t => `\`${t}\``).join(', ')}\n`;
-             }
-             mdContent += `\n#### 📊 Përmbajtja e Tabelës\n\n`;
-
-             // Headers
-             const headersLine = '| ' + docItem.headers.join(' | ') + ' |';
-             const dividerLine = '| ' + docItem.headers.map(() => '---').join(' | ') + ' |';
-             mdContent += headersLine + '\n' + dividerLine + '\n';
-
-             // Rows
-             docItem.rows.forEach(row => {
-                const cols = docItem.headers.map((_, i) => {
-                   let val = (row[`col${i+1}`] || '').toString().trim();
-                   // Escape markdown pipes
-                   val = val.replace(/\|/g, '\\|').replace(/\n/g, ' <br> ');
-                   if (row.status && row.status !== 'none' && i === 0) {
-                      const statusSymbol = row.status === 'done' ? '✅ ' : '⏳ ';
-                      val = statusSymbol + val;
-                   }
-                   return val;
-                });
-                mdContent += '| ' + cols.join(' | ') + ' |\n';
-             });
-
-             mdContent += `\n---\n\n`;
-          });
-
+          const content = JSON.stringify(backupData);
           let method = 'POST';
           let url = 'https://api.github.com/gists';
           
-          if (gistId) {
+          const gId = gistId || localStorage.getItem('grid_notepad_gist_id');
+          if (gId) {
              method = 'PATCH';
-             url = `https://api.github.com/gists/${gistId}`;
+             url = `https://api.github.com/gists/${gId}`;
           }
 
           const res = await fetch(url, {
              method,
              headers: {
-                'Authorization': `token ${gistToken}`,
+                'Authorization': `token ${token}`,
                 'Accept': 'application/vnd.github.v3+json',
                 'Content-Type': 'application/json'
              },
              body: JSON.stringify({
-                description: 'Grid Notepad Backup & Manual Notebook',
+                description: 'Grid Notepad Backup',
                 public: false,
                 files: {
-                   'grid_notepad_backup.json': { content },
-                   'manual_notebook_gist_cloud.md': { content: mdContent }
+                   'grid_notepad_backup.json': { content }
                 }
              })
           });
@@ -846,88 +495,25 @@ export function Notepad() {
           const data = await res.json();
           setGistId(data.id);
           localStorage.setItem('grid_notepad_gist_id', data.id);
-          localStorage.setItem('grid_notepad_gist_token', gistToken);
-          
-          // Auto-sync Gist credentials with Google Cloud immediately
-          if (!isGistSyncingRef.current) {
-              isGistSyncingRef.current = true;
-              await syncWithGoogleCloud(docsToSave, true);
-              isGistSyncingRef.current = false;
-          }
-          
-          if (!silent) showToast("U ruajt me sukses në GitHub Gist dhe u sinkronizua me Google Cloud!");
+          localStorage.setItem('grid_notepad_gist_token', token);
+          if (!isSilent) showToast("U ruajt me sukses në GitHub Gist!");
+          return true;
       } catch (err: any) {
-          if (!silent) showToast(err.message);
+          if (!isSilent) showToast(err.message);
+          return false;
       }
-  };
-
-  const viewGistContent = async (overrideId?: string) => {
-      const targetId = overrideId || gistId;
-      if (!targetId) return showToast("Nuk ka Gist ID. Ruani një herë dokumentet fillimisht.");
-      showToast("Duke hapur dokumentin Gist...");
-      try {
-          const res = await fetch(`https://api.github.com/gists/${targetId}`, {
-             headers: gistToken ? {
-                'Authorization': `token ${gistToken}`,
-                'Accept': 'application/vnd.github.v3+json'
-             } : undefined
-          });
-          if (!res.ok) throw new Error("Gabim gjatë ngarkimit. Gist ID i pavlefshëm.");
-          const data = await res.json();
-          const file = data.files['grid_notepad_backup.json'];
-          if (!file) throw new Error("Skedari nuk u gjet në këtë Gist.");
-          
-          const content = file.truncated ? await (await fetch(file.raw_url)).text() : file.content;
-          setGistViewerContent(content);
-          
-          try {
-             const parsed = JSON.parse(content);
-             let docsList: GridDocument[] = [];
-             let gistBlueText = '';
-             let gistSecretList: any[] = [];
-             
-             if (parsed && typeof parsed === 'object') {
-                if (Array.isArray(parsed)) {
-                   docsList = parsed;
-                } else {
-                   docsList = parsed.documents || [];
-                   gistBlueText = parsed.blueText || '';
-                   gistSecretList = parsed.secretList || [];
-                }
-             }
-             
-             setOnlineBlueText(gistBlueText);
-             setOnlineSecretList(gistSecretList);
-             
-             if (docsList.length > 0) {
-                setSelectedOnlineDoc(docsList[0]);
-             }
-          } catch(e){}
-      } catch (err: any) {
-          showToast(err.message);
-      }
-  };
-
-  const openGistDashboard = async () => {
-     setOnlineView('gist');
-     setSelectedOnlineDoc(null);
-     setIsOnlineEditing(false);
-     if (gistId) {
-        await viewGistContent();
-     } else {
-        setOnlineBlueText(blueText);
-        setOnlineSecretList(secretList);
-     }
   };
 
   const loadFromGist = async () => {
-      if (!gistToken) return showToast("Ju lutem vendosni një GitHub Token");
-      if (!gistId) return showToast("Nuk ka asnjë Gist ID të ruajtur për t'u rikthyer.");
+      const token = gistToken || localStorage.getItem('grid_notepad_gist_token');
+      const gId = gistId || localStorage.getItem('grid_notepad_gist_id');
+      if (!token) return showToast("Ju lutem vendosni një GitHub Token");
+      if (!gId) return showToast("Nuk ka asnjë Gist ID të ruajtur për t'u rikthyer.");
       showToast("Duke ngarkuar nga GitHub Gist...");
       try {
-          const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+          const res = await fetch(`https://api.github.com/gists/${gId}`, {
              headers: {
-                'Authorization': `token ${gistToken}`,
+                'Authorization': `token ${token}`,
                 'Accept': 'application/vnd.github.v3+json'
              }
           });
@@ -937,32 +523,29 @@ export function Notepad() {
           if (!file) throw new Error("Skedari nuk u gjet në këtë Gist.");
           
           const content = file.truncated ? await (await fetch(file.raw_url)).text() : file.content;
-          const parsed = JSON.parse(content);
+          const parsedData = JSON.parse(content);
           
-          let docs = parsed;
-          let gistBlueText = '';
-          let gistSecretList: any[] = [];
-          
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-             docs = parsed.documents || [];
-             gistBlueText = parsed.blueText || '';
-             gistSecretList = parsed.secretList || [];
-          }
-          
-          setDocuments(docs);
-          localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(docs));
-          
-          if (gistBlueText) {
-             setBlueText(gistBlueText);
-             localStorage.setItem('grid_notepad_blue', gistBlueText);
-          }
-          if (gistSecretList && gistSecretList.length > 0) {
-             setSecretList(gistSecretList);
-             localStorage.setItem('grid_notepad_secret_list', JSON.stringify(gistSecretList));
+          let parsedDocs = [];
+          if (Array.isArray(parsedData)) {
+            parsedDocs = parsedData;
+          } else if (parsedData && parsedData.documents) {
+            parsedDocs = parsedData.documents;
+            if (parsedData.blueText !== undefined) {
+              setOnlineBlueText(parsedData.blueText);
+              setBlueText(parsedData.blueText);
+              localStorage.setItem('grid_notepad_blue', parsedData.blueText);
+            }
+            if (parsedData.secretList !== undefined) {
+              setOnlineSecretList(parsedData.secretList);
+              setSecretList(parsedData.secretList);
+              localStorage.setItem('grid_notepad_secret_list', JSON.stringify(parsedData.secretList));
+            }
           }
 
+          setDocuments(parsedDocs);
+          localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(parsedDocs));
           if (activeDocId) {
-             const curr = docs.find((d: any) => d.id === activeDocId);
+             const curr = parsedDocs.find((d: any) => d.id === activeDocId);
              if (curr) {
                  setRows(curr.rows);
                  setHeaders(curr.headers);
@@ -976,65 +559,321 @@ export function Notepad() {
       }
   };
 
-  const [mainTab, setMainTab] = useState<'lista' | 'etiketa'>('lista');
+
+
+  // Missing states from first block replacement
+  const [activeTags, setActiveTags] = React.useState<string[]>([]);
+  const [autoSaveMsg, setAutoSaveMsg] = React.useState<string>("");
+  const [docSearch, setDocSearch] = React.useState<string>("");
+  const [showTextMenu, setShowTextMenu] = React.useState<boolean>(false);
+  const [showTextColorMenu, setShowTextColorMenu] = React.useState<boolean>(false);
+  const [showTagColorMenu, setShowTagColorMenu] = React.useState<boolean>(false);
+  const [previewSelectedRows, setPreviewSelectedRows] = React.useState<boolean>(false);
+  const [selectedRows, setSelectedRows] = React.useState<Set<number>>(new Set<number>());
+  const [showConfirmDeleteSelected, setShowConfirmDeleteSelected] = React.useState<boolean>(false);
+  const [showConfirmClear, setShowConfirmClear] = React.useState<boolean>(false);
+  const [showConfirmClose, setShowConfirmClose] = React.useState<boolean>(false);
+  const [showThemeMenu, setShowThemeMenu] = React.useState<boolean>(false);
+
+  // Text options states and updates
+  const [textSize, setTextSize] = React.useState<number>(() => parseInt(localStorage.getItem("grid_notepad_text_size") || "12"));
+  const updateTextSize = (val: number) => {
+    setTextSize(val);
+    localStorage.setItem("grid_notepad_text_size", String(val));
+  };
+
+  const [textWeight, setTextWeight] = React.useState<number>(() => parseInt(localStorage.getItem("grid_notepad_text_weight") || "400"));
+  const updateTextWeight = (val: number) => {
+    setTextWeight(val);
+    localStorage.setItem("grid_notepad_text_weight", String(val));
+  };
+
+  const [textColorMode, setTextColorMode] = React.useState<string>(() => localStorage.getItem("grid_notepad_text_color_mode") || "default");
+  const updateTextColorMode = (val: string) => {
+    setTextColorMode(val);
+    localStorage.setItem("grid_notepad_text_color_mode", val);
+  };
+
+  const getActualTextColor = (mode: string) => {
+    if (mode === "default") return isDark ? "#ffffff" : "#18181b";
+    return mode;
+  };
+
+  // Missing helper function
+  const getAlbanianDateTime = () => {
+    const options: Intl.DateTimeFormatOptions = {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    };
+    return new Date().toLocaleDateString("sq-AL", options);
+  };
+
+  // Cell Long-Press / Hold refs and handlers
+  const isLongPress = React.useRef<Record<number, boolean>>({});
+  const pressTimers = React.useRef<Record<number, any>>({});
+
+  const handleCellHoldStart = (rIndex: number, colKey: string) => {
+    isLongPress.current[rIndex] = false;
+    pressTimers.current[rIndex] = setTimeout(() => {
+      isLongPress.current[rIndex] = true;
+      setSelectedRows((prev: Set<number>) => {
+        const n = new Set(prev);
+        n.add(rIndex);
+        return n;
+      });
+      showToast(t("Rrjeshti u zgjodh!", "Row selected!"));
+    }, 1500); // 1.5 seconds hold to select row
+  };
+
+  const handleCellHoldCancel = () => {
+    Object.values(pressTimers.current).forEach(t => clearTimeout(t as any));
+  };
+
+  // Extra refs and states needed by full application scope
+  const isGistSyncingRef = React.useRef<boolean>(false);
+  const [isSaving, setIsSaving] = React.useState<boolean>(false);
+  const localSaveTimeout = React.useRef<any>(null);
+  const autoSaveTimeout = React.useRef<any>(null);
+
+  const [tempGistId, setTempGistId] = React.useState<string>('');
+  const [onlineSearch, setOnlineSearch] = React.useState<string>('');
+
+  const addFileToSimulatedFilesystem = (fileName: string, fileSize: number) => {
+    setSimulatedFilesystem(prev => {
+      const currentFolderKey = activeProvider + (currentPath.length > 0 ? '/' + currentPath.join('/') : '');
+      const currentItems = prev[currentFolderKey] || [];
+      if (currentItems.some(item => item.name === fileName)) {
+        return prev;
+      }
+      const newItem = {
+        name: fileName,
+        size: fileSize,
+        updatedAt: new Date().toISOString()
+      };
+      return {
+        ...prev,
+        [currentFolderKey]: [...currentItems, newItem]
+      };
+    });
+  };
+
+  const getCapacitorDirectory = (dirStr: string) => {
+    if (dirStr === 'documents' || dirStr.includes('documents')) return Directory.Documents;
+    if (dirStr === 'data' || dirStr.includes('data')) return Directory.Data;
+    if (dirStr === 'cache' || dirStr.includes('cache')) return Directory.Cache;
+    return Directory.Documents;
+  };
+
+  const getDirectoryHandle = async () => {
+    if (saveDirectoryHandle) return saveDirectoryHandle;
+    try {
+      const handle = await (window as any).showDirectoryPicker();
+      setSaveDirectoryHandle(handle);
+      return handle;
+    } catch (e) {
+      console.error(e);
+      return null;
+    }
+  };
+
+
+
+  // Core and UI states
+  const [isDark, setIsDark] = useState<boolean>(() => localStorage.getItem('grid_notepad_theme') === 'dark');
+  const [themeSync, setThemeSync] = useState<boolean>(() => localStorage.getItem('grid_theme_sync') !== 'false');
+  const [accentColor, setAccentColor] = useState<keyof typeof COLOR_THEMES>(
+    (localStorage.getItem('grid_notepad_accent') as keyof typeof COLOR_THEMES) || 'blue'
+  );
+  const [language, setLanguage] = useState<'sq' | 'en'>(
+    (localStorage.getItem('language') as 'sq' | 'en') || 'sq'
+  );
+
+  // Labels states
   const [customLabels, setCustomLabels] = useState<string[]>(() => {
-     const saved = localStorage.getItem('grid_notepad_custom_labels');
-     return saved ? JSON.parse(saved) : ['Kopshti', 'Shtëpia', 'Personal', 'Punë'];
+    try {
+      return JSON.parse(localStorage.getItem('customLabels') || '[]');
+    } catch (e) {
+      return [];
+    }
   });
   const [selectedLabelFolder, setSelectedLabelFolder] = useState<string | null>(null);
-  const [transferDocId, setTransferDocId] = useState<string | null>(null);
+  const [catalogLayout, setCatalogLayout] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('catalogLayout') as 'grid' | 'list') || 'grid';
+  });
 
-  const saveCustomLabels = (updatedLabels: string[]) => {
-     setCustomLabels(updatedLabels);
-     localStorage.setItem('grid_notepad_custom_labels', JSON.stringify(updatedLabels));
+  // Documents states
+  const [documents, setDocuments] = useState<GridDocument[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('grid_notepad_documents_v2') || '[]');
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const allAvailableTags = React.useMemo(() => {
+    return Array.from(new Set(documents.flatMap(doc => doc.tags || []))).sort();
+  }, [documents]);
+  const [activeDocId, setActiveDocId] = useState<string | null>(null);
+  const [title, setTitle] = useState<string>('');
+  const [headers, setHeaders] = useState<string[]>(['Kolona 1', 'Kolona 2', 'Kolona 3', 'Kolona 4']);
+  const [columnWidths, setColumnWidths] = useState<number[]>([150, 150, 150, 150]);
+  const [rows, setRows] = useState<GridRow[]>([]);
+  const [activeCell, setActiveCell] = useState<{ rIndex: number; colKey: string } | null>(null);
+  const [modalText, setModalText] = useState<string>('');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // Auth/Email states that might be missing
+  const [authModal, setAuthModal] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [recoveryEmail, setRecoveryEmail] = useState('');
+  const [resetSent, setResetSent] = useState(false);
+  const [logoutInfoModal, setLogoutInfoModal] = useState(false);
+
+  // Calculator states
+  const [showCalculator, setShowCalculator] = useState<boolean>(false);
+  const [calcDisplay, setCalcDisplay] = useState<string>('0');
+  const [calcPos, setCalcPos] = useState<{ x: number; y: number }>({ x: 100, y: 100 });
+  const [calcIsDragging, setCalcIsDragging] = useState(false);
+  const [calcDragOffset, setCalcDragOffset] = useState({ x: 0, y: 0 });
+
+  // Refs
+  const activeDocIdRef = useRef<string | null>(null);
+  const latestDocsRef = useRef<GridDocument[]>([]);
+  const pendingLocalSaveRef = useRef<any>(null);
+
+  // Translations helper
+  const t = (sq: string, en: string) => {
+    return language === 'sq' ? sq : en;
   };
 
-  const handleAddCustomLabel = () => {
-     const name = prompt(t("Shkruani emrin e etiketës së re:", "Enter the name of the new label:"));
-     if (name && name.trim()) {
-        const trimmed = name.trim();
-        if (customLabels.includes(trimmed)) {
-           showToast(t("Kjo etiketë ekziston tashmë!", "This label already exists!"));
-           return;
-        }
-        const updated = [...customLabels, trimmed];
-        saveCustomLabels(updated);
-        showToast(t("Etiketa u shtua me sukses!", "Label added successfully!"));
-     }
+  const saveCustomLabels = (labels: string[]) => {
+    setCustomLabels(labels);
+    localStorage.setItem('customLabels', JSON.stringify(labels));
   };
 
-  const handleRenameCustomLabel = (index: number) => {
-     const oldName = customLabels[index];
-     const newName = prompt(t(`Shkruani emrin e ri për etiketën "${oldName}":`, `Enter the new name for label "${oldName}":`), oldName);
-     if (newName && newName.trim() && newName.trim() !== oldName) {
-        const trimmed = newName.trim();
-        if (customLabels.includes(trimmed)) {
-           showToast(t("Kjo etiketë ekziston tashmë!", "This label already exists!"));
-           return;
-        }
-        const updatedLabels = [...customLabels];
-        updatedLabels[index] = trimmed;
-        saveCustomLabels(updatedLabels);
-
-        // Update all documents that had the old tag to have the new tag
-        const updatedDocs = documents.map(doc => {
-           if (doc.tags && doc.tags.includes(oldName)) {
-              return {
-                 ...doc,
-                 tags: doc.tags.map(tagItem => tagItem === oldName ? trimmed : tagItem)
-              };
-           }
-           return doc;
-        });
-        setDocuments(updatedDocs);
-        triggerAutoSave(updatedDocs);
-        
-        if (selectedLabelFolder === oldName) {
-           setSelectedLabelFolder(trimmed);
-        }
-        showToast(t("Etiketa u ndryshua me sukses!", "Label renamed successfully!"));
-     }
+  const isDocAllDeletedX = (doc: any) => {
+    if (!doc || !doc.rows || doc.rows.length === 0) return false;
+    const contentRows = doc.rows.filter((r: any) => 
+      (r.col1 && r.col1.trim()) || 
+      (r.col2 && r.col2.trim()) || 
+      (r.col3 && r.col3.trim()) || 
+      (r.col4 && r.col4.trim())
+    );
+    if (contentRows.length === 0) return false;
+    return contentRows.every((r: any) => r.status === 'x');
   };
+
+  // Calculator handlers
+  const handleCalcPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    setCalcIsDragging(true);
+    setCalcDragOffset({
+      x: e.clientX - calcPos.x,
+      y: e.clientY - calcPos.y
+    });
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const handleCalcPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!calcIsDragging) return;
+    setCalcPos({
+      x: e.clientX - calcDragOffset.x,
+      y: e.clientY - calcDragOffset.y
+    });
+  };
+
+  const handleCalcPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    setCalcIsDragging(false);
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch (err) {}
+  };
+
+  const handleCalcInput = (btn: string) => {
+    if (btn === 'C') {
+      setCalcDisplay('0');
+    } else if (btn === 'Del' || btn === '←') {
+      if (calcDisplay.length > 1) {
+        setCalcDisplay(calcDisplay.slice(0, -1));
+      } else {
+        setCalcDisplay('0');
+      }
+    } else if (btn === '=') {
+      try {
+        const expr = calcDisplay.replace(/x/g, '*').replace(/÷/g, '/');
+        if (/^[0-9+\-*/().\s]+$/.test(expr)) {
+          const result = new Function(`return (${expr})`)();
+          setCalcDisplay(String(result));
+        } else {
+          setCalcDisplay('Gabim');
+        }
+      } catch (err) {
+        setCalcDisplay('Gabim');
+      }
+    } else {
+      if (calcDisplay === '0' || calcDisplay === 'Gabim') {
+        if ('+-*/'.includes(btn)) {
+          setCalcDisplay('0' + btn);
+        } else {
+          setCalcDisplay(btn);
+        }
+      } else {
+        setCalcDisplay(calcDisplay + btn);
+      }
+    }
+  };
+
+const handleRenameCustomLabel = (index: number) => {
+      const oldName = customLabels[index];
+      const newName = prompt(t(`Shkruani emrin e ri për etiketën "${oldName}":`, `Enter the new name for label "${oldName}":`), oldName);
+      if (newName !== null) {
+         let trimmed = newName.trim();
+         if (!trimmed) {
+            let placeholder = t("Etiketa pa emër", "Label without name");
+            let counter = 1;
+            let current = placeholder;
+            while (customLabels.includes(current)) {
+               counter++;
+               current = `${placeholder} ${counter}`;
+            }
+            trimmed = current;
+         }
+         if (trimmed === oldName) return;
+         if (customLabels.includes(trimmed)) {
+            showToast(t("Kjo etiketë ekziston tashmë!", "This label already exists!"));
+            return;
+         }
+         const updatedLabels = [...customLabels];
+         updatedLabels[index] = trimmed;
+         saveCustomLabels(updatedLabels);
+
+         // Update all documents that had the old tag to have the new tag
+         const updatedDocs = documents.map(doc => {
+            if (doc.tags && doc.tags.includes(oldName)) {
+               return {
+                  ...doc,
+                  tags: doc.tags.map(tagItem => tagItem === oldName ? trimmed : tagItem)
+               };
+            }
+            return doc;
+         });
+         setDocuments(updatedDocs);
+         triggerAutoSave(updatedDocs);
+         
+         if (selectedLabelFolder === oldName) {
+            setSelectedLabelFolder(trimmed);
+         }
+         showToast(t("Etiketa u ndryshua me sukses!", "Label renamed successfully!"));
+      }
+   };
 
   const handleDeleteCustomLabel = (index: number) => {
      const labelName = customLabels[index];
@@ -9349,16 +9188,33 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
             {/* If Lista Tab, show Search and Dynamic Tags */}
             {mainTab === 'lista' && (
                <>
-                  <div className="relative w-full mt-1 shrink-0">
-                     <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-                     <input 
-                        value={catalogSearch}
-                        onChange={(e) => setCatalogSearch(e.target.value)}
-                        placeholder={t("Kërko dokumente ose tekst brenda tyre...", "Search documents or text inside them...")}
-                        className={`w-full pl-9 pr-4 py-1.5 text-sm rounded-lg border focus:outline-none focus:border-accent-500 transition-colors ${
-                           isDark ? "bg-zinc-800 border-zinc-700 text-white placeholder-zinc-500" : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400"
+                  <div className="flex gap-2 w-full mt-1 shrink-0">
+                     <div className="relative flex-grow">
+                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                        <input 
+                           value={catalogSearch}
+                           onChange={(e) => setCatalogSearch(e.target.value)}
+                           placeholder={t("Kërko dokumente ose tekst brenda tyre...", "Search documents or text inside them...")}
+                           className={`w-full pl-9 pr-4 py-1.5 text-sm rounded-lg border focus:outline-none focus:border-accent-500 transition-colors ${
+                              isDark ? "bg-zinc-800 border-zinc-700 text-white placeholder-zinc-500" : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400"
+                           }`}
+                        />
+                     </div>
+                     <button 
+                        onClick={() => {
+                           const next = catalogLayout === 'grid' ? 'list' : 'grid';
+                           setCatalogLayout(next);
+                           localStorage.setItem('grid_notepad_catalog_layout', next);
+                        }}
+                        className={`px-2.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center shrink-0 ${
+                           isDark 
+                              ? "bg-zinc-800 border-zinc-700 hover:bg-zinc-750 text-zinc-300" 
+                              : "bg-white border-zinc-300 hover:bg-zinc-100 text-zinc-700"
                         }`}
-                     />
+                        title={catalogLayout === 'grid' ? t("Shiko si Listë", "View as List") : t("Shiko si Grid", "View as Grid")}
+                     >
+                        {catalogLayout === 'grid' ? <List className="w-4 h-4" /> : <LayoutGrid className="w-4 h-4" />}
+                     </button>
                   </div>
                   {allAvailableTags.length > 0 && (
                      <div className="flex flex-wrap gap-1.5 mt-2 pb-1 border-b border-zinc-200 dark:border-zinc-850 shrink-0">
@@ -9415,7 +9271,10 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
          
          <div className={`p-4 sm:p-5 flex-1 overflow-y-auto w-full max-w-full`}>
             {mainTab === 'lista' ? (
-               <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+               <div className={catalogLayout === 'grid' 
+                  ? "grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 animate-in fade-in duration-200" 
+                  : "flex flex-col gap-2 max-w-4xl animate-in fade-in duration-200"
+               }>
                      {/* KRIJO KARTËN E RE */}
                      <button 
                        onClick={() => createNewDocument()}
@@ -9439,50 +9298,68 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                         <div className={`col-span-full text-center py-10 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
                           {t('Asnjë dokument nuk u gjet.', 'No documents found.')}
                         </div>
-                     ) : filteredDocs.map(doc => (
-                        <div key={doc.id} onClick={() => openDocument(doc)} className={`flex items-center justify-between p-2 border rounded-xl cursor-pointer transition-all hover:translate-x-1 ${
-                           isDark ? "bg-zinc-900 border-zinc-800 hover:border-zinc-600 shadow-sm" : "bg-white border-zinc-200 hover:border-zinc-400 shadow-sm"
-                        }`}>
-                           <div className="flex flex-col flex-1 shadow-none min-w-0 pr-2 gap-0.5">
-                              <h3 className={`font-bold text-sm truncate ${textColor}`}>{doc.title}</h3>
-                              <div className={`flex flex-row flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500`}>
-                                 <span className="flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.createdAt, 'dd MMM yyyy')}</span>
-                                 <span className="flex items-center gap-0.5"><Save className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.updatedAt, 'HH:mm')}</span>
+                     ) : filteredDocs.map(doc => {
+                        const allDeleted = isDocAllDeletedX(doc);
+                        return (
+                           <div 
+                              key={doc.id} 
+                               onClick={() => openDocument(doc)} 
+                               className={`flex items-between justify-between p-2.5 border rounded-xl cursor-pointer transition-all hover:translate-x-1 ${
+                                  allDeleted
+                                     ? isDark 
+                                        ? "bg-red-950/10 border-red-900/40 hover:border-red-700 shadow-sm" 
+                                        : "bg-red-50/20 border-red-200 hover:border-red-300 shadow-sm"
+                                     : isDark 
+                                        ? "bg-zinc-900 border-zinc-800 hover:border-zinc-600 shadow-sm" 
+                                        : "bg-white border-zinc-200 hover:border-zinc-400 shadow-sm"
+                               }`}
+                            >
+                               <div className="flex flex-col flex-1 shadow-none min-w-0 pr-2 gap-0.5">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                     <h3 className={`font-bold text-sm truncate ${textColor}`}>{doc.title}</h3>
+                                     {allDeleted && (
+                                        <Lock className="w-3.5 h-3.5 text-red-500 shrink-0" title={t("Të gjitha rreshtat e fshira", "All rows deleted")} />
+                                     )}
+                                  </div>
+                                  <div className={`flex flex-row flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500`}>
+                                     <span className="flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.createdAt, 'dd MMM yyyy')}</span>
+                                     <span className="flex items-center gap-0.5"><Save className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.updatedAt, 'HH:mm')}</span>
+                                  </div>
+                                  {(doc.tags && doc.tags.length > 0) && (
+                                    <div className="flex flex-wrap gap-1 mt-0.5">
+                                       {doc.tags.map(tag => (
+                                          <span key={tag} className={`px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all ${getTagColors(tag)}`}>
+                                             #{tag}
+                                          </span>
+                                       ))}
+                                    </div>
+                                 )}
                               </div>
-                              {(doc.tags && doc.tags.length > 0) && (
-                                 <div className="flex flex-wrap gap-1 mt-0.5">
-                                    {doc.tags.map(tag => (
-                                       <span key={tag} className={`px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all ${getTagColors(tag)}`}>
-                                          #{tag}
-                                       </span>
-                                    ))}
-                                 </div>
-                              )}
-                           </div>
-                           <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                              {/* Transfer List button */}
-                              <button
-                                 onClick={() => setTransferDocId(doc.id)}
-                                 className={`p-2 rounded-lg text-zinc-400 hover:text-blue-500 transition-colors ${isDark ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}
-                                 title={t("Transfero te Etiketa", "Transfer to Label")}
-                              >
-                                 <FolderOpen className="w-4 h-4" />
-                              </button>
+                              <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                 {/* Transfer List button */}
+                                 <button
+                                    onClick={() => setTransferDocId(doc.id)}
+                                    className={`p-2 rounded-lg text-zinc-400 hover:text-blue-500 transition-colors ${isDark ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}
+                                    title={t("Transfero te Etiketa", "Transfer to Label")}
+                                 >
+                                    <FolderOpen className="w-4 h-4" />
+                                 </button>
 
-                              {/* Delete Button */}
-                              <button 
-                                 onClick={() => { 
-                                    executeProtectedAction(() => {
-                                       setDocToDelete(doc.id);
-                                    });
-                                 }} 
-                                 className={`p-2 rounded-lg text-zinc-500 hover:text-red-500 active:text-red-600 active:bg-red-500/10 transition-colors ${isDark ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}
-                              >
-                                 <Trash2 className="w-4 h-4 pointer-events-none" />
-                              </button>
+                                 {/* Delete Button */}
+                                 <button 
+                                    onClick={() => { 
+                                       executeProtectedAction(() => {
+                                          setDocToDelete(doc.id);
+                                       });
+                                    }} 
+                                    className={`p-2 rounded-lg text-zinc-500 hover:text-red-500 active:text-red-600 active:bg-red-500/10 transition-colors ${isDark ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}
+                                 >
+                                    <Trash2 className="w-4 h-4 pointer-events-none" />
+                                 </button>
+                              </div>
                            </div>
-                        </div>
-                     ))}
+                        );
+                     })}
                   </div>
             ) : (
                /* TAB ETIKETA */
