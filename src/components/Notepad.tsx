@@ -405,8 +405,8 @@ export function Notepad() {
   }, [simulatedFilesystem]);
 
   const addFileToSimulatedFilesystem = (filename: string, blobSize: number) => {
-      const baseDir = localStorage.getItem('grid_android_base_dir') || 'Memoria e Telefonit';
-      const mockFolder = localStorage.getItem('grid_mock_folder') || '';
+      const baseDir = androidBaseDir || localStorage.getItem('grid_android_base_dir') || 'Memoria e Telefonit';
+      const mockFolder = folderName || localStorage.getItem('grid_mock_folder') || '';
       const folderKey = baseDir + (mockFolder ? '/' + mockFolder : '');
       
       let sizeStr = '0 B';
@@ -436,6 +436,7 @@ export function Notepad() {
               { name: filename, type: 'file', size: sizeStr, date: dateStr }
           ];
           
+          localStorage.setItem('grid_simulated_fs', JSON.stringify(next));
           return next;
       });
   };
@@ -974,6 +975,93 @@ export function Notepad() {
           showToast(err.message);
       }
   };
+
+  const [mainTab, setMainTab] = useState<'lista' | 'etiketa'>('lista');
+  const [customLabels, setCustomLabels] = useState<string[]>(() => {
+     const saved = localStorage.getItem('grid_notepad_custom_labels');
+     return saved ? JSON.parse(saved) : ['Kopshti', 'Shtëpia', 'Personal', 'Punë'];
+  });
+  const [selectedLabelFolder, setSelectedLabelFolder] = useState<string | null>(null);
+  const [transferDocId, setTransferDocId] = useState<string | null>(null);
+
+  const saveCustomLabels = (updatedLabels: string[]) => {
+     setCustomLabels(updatedLabels);
+     localStorage.setItem('grid_notepad_custom_labels', JSON.stringify(updatedLabels));
+  };
+
+  const handleAddCustomLabel = () => {
+     const name = prompt(t("Shkruani emrin e etiketës së re:", "Enter the name of the new label:"));
+     if (name && name.trim()) {
+        const trimmed = name.trim();
+        if (customLabels.includes(trimmed)) {
+           showToast(t("Kjo etiketë ekziston tashmë!", "This label already exists!"));
+           return;
+        }
+        const updated = [...customLabels, trimmed];
+        saveCustomLabels(updated);
+        showToast(t("Etiketa u shtua me sukses!", "Label added successfully!"));
+     }
+  };
+
+  const handleRenameCustomLabel = (index: number) => {
+     const oldName = customLabels[index];
+     const newName = prompt(t(`Shkruani emrin e ri për etiketën "${oldName}":`, `Enter the new name for label "${oldName}":`), oldName);
+     if (newName && newName.trim() && newName.trim() !== oldName) {
+        const trimmed = newName.trim();
+        if (customLabels.includes(trimmed)) {
+           showToast(t("Kjo etiketë ekziston tashmë!", "This label already exists!"));
+           return;
+        }
+        const updatedLabels = [...customLabels];
+        updatedLabels[index] = trimmed;
+        saveCustomLabels(updatedLabels);
+
+        // Update all documents that had the old tag to have the new tag
+        const updatedDocs = documents.map(doc => {
+           if (doc.tags && doc.tags.includes(oldName)) {
+              return {
+                 ...doc,
+                 tags: doc.tags.map(tagItem => tagItem === oldName ? trimmed : tagItem)
+              };
+           }
+           return doc;
+        });
+        setDocuments(updatedDocs);
+        triggerAutoSave(updatedDocs);
+        
+        if (selectedLabelFolder === oldName) {
+           setSelectedLabelFolder(trimmed);
+        }
+        showToast(t("Etiketa u ndryshua me sukses!", "Label renamed successfully!"));
+     }
+  };
+
+  const handleDeleteCustomLabel = (index: number) => {
+     const labelName = customLabels[index];
+     if (confirm(t(`Dëshironi të fshini etiketën "${labelName}"?\nDokumentet nuk do të fshihen, thjesht do të hiqet etiketa prej tyre.`, `Are you sure you want to delete label "${labelName}"?\nDocuments won't be deleted, only the label will be removed from them.`))) {
+        const updatedLabels = customLabels.filter((_, i) => i !== index);
+        saveCustomLabels(updatedLabels);
+
+        // Remove tag from documents
+        const updatedDocs = documents.map(doc => {
+           if (doc.tags && doc.tags.includes(labelName)) {
+              return {
+                 ...doc,
+                 tags: doc.tags.filter(tagItem => tagItem !== labelName)
+              };
+           }
+           return doc;
+        });
+        setDocuments(updatedDocs);
+        triggerAutoSave(updatedDocs);
+
+        if (selectedLabelFolder === labelName) {
+           setSelectedLabelFolder(null);
+        }
+        showToast(t("Etiketa u fshi!", "Label was deleted!"));
+     }
+  };
+
   const [blueModal, setBlueModal] = useState(false);
   const [blueText, setBlueText] = useState('');
   const [secretList, setSecretList] = useState<{id: string, text: string, done: boolean}[]>([]);
@@ -1177,14 +1265,10 @@ export function Notepad() {
 
   const handleExportBackup = (docToExport?: GridDocument) => {
      const exportData = docToExport ? [docToExport] : (selectedCloudDocIds.length > 0 ? documents.filter(d => selectedCloudDocIds.includes(d.id)) : documents);
-     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
-     const downloadAnchor = document.createElement('a');
-     downloadAnchor.setAttribute("href", dataStr);
-     downloadAnchor.setAttribute("download", `notebook_cloud_backup_${new Date().toISOString().slice(0, 10)}.json`);
-     document.body.appendChild(downloadAnchor);
-     downloadAnchor.click();
-     downloadAnchor.remove();
-     showToast("Eksportimi i backup-it u përfundua me sukses!");
+     const content = JSON.stringify(exportData, null, 2);
+     const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+     const filename = `notebook_cloud_backup_${new Date().toISOString().slice(0, 10)}.json`;
+     handleDownload(blob, filename, 'application/json', 'Backup Cloud');
   };
 
   const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1906,7 +1990,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
    const handleDeleteSecretItem = (idToDelete: string) => {
       const itemToDelete = secretList.find(item => item.id === idToDelete);
       const name = itemToDelete ? (itemToDelete.name || itemToDelete.text) : '';
-      if (confirm(t(`Dëshironi ta fshini bllokun sekret "${name}"?`, `Are you sure you want to delete secret block "${name}"?`))) {
+      if (confirm(t(`Dëshironi ta fshini bllokun sekret "${name}"?\nKy shënim do të hiqet përgjithmonë.`, `Are you sure you want to delete secret block "${name}"?\nThis note will be removed permanently.`))) {
          const updated = secretList.filter(item => item.id !== idToDelete);
          setSecretList(updated);
          localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
@@ -1930,35 +2014,22 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       }
    };
 
-   const handleSelectAllSecrets = () => {
-      showToast(t("Veprimi nuk është i disponueshëm në strukturën e re.", "Action not available in the new structure."));
-   };
-
-   const handleExportActiveNoteAsTxt = (item: any) => {
+   const handleExportActiveNoteAsTxt = async (item: any) => {
       if (!item) return;
       const content = item.content || '';
-      const dataStr = "data:text/plain;charset=utf-8," + encodeURIComponent(content);
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", `${(item.name || item.text || 'sekret').toLowerCase().replace(/\s+/g, '_')}_${format(new Date(), 'yyyyMMdd_HHmmss')}.txt`);
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-      showToast(t("Shënimi u shkarkua si skedar .txt!", "Note was downloaded as a .txt file!"));
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const filename = `${(item.name || item.text || 'sekret').toLowerCase().replace(/\s+/g, '_')}_${format(new Date(), 'yyyyMMdd_HHmmss')}.txt`;
+      await handleDownload(blob, filename, 'text/plain', 'Eksport Shënim Sekret');
    };
 
-   const handleExportSecrets = () => {
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
+   const handleExportSecrets = async () => {
+      const content = JSON.stringify({
          blueText,
          secretList
-      }, null, 2));
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", `bllok_sekrete_backup_${format(new Date(), 'yyyyMMdd_HHmmss')}.json`);
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-      showToast(t("Dosja e plotë e sekreteve u shkarkua me sukses!", "Full secrets file downloaded successfully!"));
+      }, null, 2);
+      const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+      const filename = `bllok_sekrete_backup_${format(new Date(), 'yyyyMMdd_HHmmss')}.json`;
+      await handleDownload(blob, filename, 'application/json', 'Backup Sekrete');
    };
 
    const handleImportSecretsClick = () => {
@@ -3463,31 +3534,18 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                       showToast("Gabim gjatë ruajtjes në dosje. Riprovoni ose rregulloni lejet.");
                   }
               } else {
-                  let savedFolder = localStorage.getItem('grid_mock_folder') || folderName;
+                  let savedFolder = localStorage.getItem('grid_mock_folder') !== null ? localStorage.getItem('grid_mock_folder')! : folderName;
+                  const currentBase = localStorage.getItem('grid_android_base_dir') || androidBaseDir || 'Memoria e Telefonit';
                   
-                  if (savedFolder) {
-                      showToast(`U sinkronizua automatikisht drejt dosjes: '${savedFolder}'`);
-                      let sanitizedFolder = savedFolder.replace(/[^a-zA-Z0-9_\s\/-]/g, '').trim();
-                      sanitizedFolder = sanitizedFolder.replace(/^\/+|\/+$/g, '').replace(/\//g, '_');
-                      const finalFilename = sanitizedFolder ? `${sanitizedFolder}_${filename}` : filename;
-                      
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = finalFilename;
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                      URL.revokeObjectURL(url);
-                      return;
-                  } else {
-                      showToast("Dosja nuk është zgjedhur! Shkoni tek Settings për ta zgjedhur.");
-                  }
+                  showToast(t(`U sinkronizua automatikisht drejt dosjes: '${currentBase}${savedFolder ? '/' + savedFolder : ''}'`, `Automatically synced to folder: '${currentBase}${savedFolder ? '/' + savedFolder : ''}'`));
+                  let sanitizedFolder = savedFolder ? savedFolder.replace(/[^a-zA-Z0-9_\s\/-]/g, '').trim() : '';
+                  sanitizedFolder = sanitizedFolder.replace(/^\/+|\/+$/g, '').replace(/\//g, '_');
+                  const finalFilename = sanitizedFolder ? `${sanitizedFolder}_${filename}` : filename;
                   
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
-                  a.download = filename;
+                  a.download = finalFilename;
                   document.body.appendChild(a);
                   a.click();
                   document.body.removeChild(a);
@@ -5830,16 +5888,16 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                         <textarea
                            value={onlineBlueText}
                            onChange={(e) => setOnlineBlueText(e.target.value)}
-                           className={`w-full flex-grow p-6 sm:p-8 md:p-10 resize-none border-2 rounded-2xl focus:outline-none focus:border-accent-500 text-base sm:text-lg md:text-xl font-medium leading-relaxed tracking-wide shadow-inner ${
+                           className={`w-full flex-grow p-6 sm:p-8 md:p-10 resize-none overflow-y-auto border-2 rounded-2xl focus:outline-none focus:border-accent-500 text-base sm:text-lg md:text-xl font-medium leading-relaxed tracking-wide shadow-inner ${
                               isDark 
-                                 ? 'bg-zinc-950/80 border-zinc-800 text-zinc-100 placeholder-zinc-650 focus:bg-zinc-950 focus:ring-4 focus:ring-accent-500/10' 
+                                 ? 'bg-zinc-950/80 border-zinc-800 text-zinc-100 placeholder-zinc-500 focus:bg-zinc-950 focus:ring-4 focus:ring-accent-500/10' 
                                  : 'bg-white border-zinc-200 text-zinc-900 placeholder-zinc-400 focus:bg-white focus:ring-4 focus:ring-accent-500/10'
                            }`}
                            placeholder="Shkruani shënimet tuaja me tekst këtu..."
                         />
                      ) : (
                         <div className={`w-full flex-grow p-4 border rounded-xl overflow-y-auto text-sm leading-relaxed whitespace-pre-wrap ${
-                           isDark ? 'bg-zinc-900/30 border-zinc-850 text-zinc-200' : 'bg-zinc-50/30 border-zinc-150 text-zinc-750'
+                           isDark ? 'bg-zinc-900/30 border-zinc-800 text-zinc-200' : 'bg-zinc-50/30 border-zinc-200 text-zinc-700'
                         }`}>
                            {onlineBlueText || (
                               <div className="text-center py-20 text-xs text-zinc-400 italic">
@@ -5935,7 +5993,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                     setOnlineSecretList([...onlineSecretList, newItem]);
                                  }}
                                  className={`px-2.5 py-1 text-[11px] font-bold rounded-md border flex items-center gap-1 shrink-0 active:scale-95 ${
-                                    isDark ? 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-300' : 'bg-white border-zinc-300 hover:bg-zinc-100 text-zinc-650'
+                                    isDark ? 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-300' : 'bg-white border-zinc-300 hover:bg-zinc-100 text-zinc-600'
                                  }`}
                               >
                                  <Plus className="w-3.5 h-3.5" /> Element
@@ -5943,7 +6001,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                               <button
                                  onClick={() => setIsOnlineEditing(false)}
                                  className={`px-2.5 py-1 text-[11px] font-bold rounded-md border flex items-center gap-1 shrink-0 active:scale-95 ${
-                                    isDark ? 'bg-zinc-800/80 border-zinc-700 hover:bg-zinc-755 text-zinc-355' : 'bg-white border-zinc-300 hover:bg-zinc-100 text-zinc-650'
+                                    isDark ? 'bg-zinc-800/80 border-zinc-700 hover:bg-zinc-700 text-zinc-300' : 'bg-white border-zinc-300 hover:bg-zinc-100 text-zinc-600'
                                  }`}
                               >
                                  Anulo
@@ -5954,7 +6012,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                               <button
                                  onClick={() => setIsOnlineEditing(true)}
                                  className={`px-2.5 py-1 text-[11px] font-bold rounded-md border flex items-center gap-1 shrink-0 active:scale-95 ${
-                                    isDark ? 'bg-zinc-850 border-zinc-750 hover:bg-zinc-800 text-zinc-300' : 'bg-white border-zinc-250 hover:bg-zinc-100 text-zinc-650'
+                                    isDark ? 'bg-zinc-800 border-zinc-700 hover:bg-zinc-800 text-zinc-300' : 'bg-white border-zinc-200 hover:bg-zinc-100 text-zinc-600'
                                  }`}
                                  title="Ndrysho listën sekrete online"
                               >
@@ -6091,14 +6149,18 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                  {/* TEXT INPUT / VIEW */}
                                  <div className="flex-1">
                                     {isOnlineEditing ? (
-                                       <input
-                                          type="text"
+                                       <textarea
+                                          rows={1}
                                           value={item.text}
                                           onChange={(e) => {
                                              const val = e.target.value;
                                              setOnlineSecretList(prev => prev.map((itm, i) => i === idx ? { ...itm, text: val } : itm));
                                           }}
-                                          className={`w-full bg-transparent text-sm py-0.5 px-1 focus:outline-none border-b border-transparent focus:border-accent-500/30 font-semibold ${
+                                          onInput={(e: any) => {
+                                             e.target.style.height = 'auto';
+                                             e.target.style.height = e.target.scrollHeight + 'px';
+                                          }}
+                                          className={`w-full bg-transparent text-sm py-0.5 px-1 focus:outline-none border-b border-transparent focus:border-accent-500/30 font-semibold resize-none h-auto overflow-hidden leading-snug ${
                                              isDark ? 'text-white' : 'text-zinc-900'
                                           }`}
                                           placeholder="Shkruani elementin sekret..."
@@ -6273,11 +6335,15 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
              { name: trimmed, type: 'folder' }
          ];
          const newFolderKey = currentKey + '/' + trimmed;
-         setSimulatedFilesystem(prev => ({
-             ...prev,
-             [currentKey]: updatedItems,
-             [newFolderKey]: []
-         }));
+         setSimulatedFilesystem(prev => {
+             const next = {
+                 ...prev,
+                 [currentKey]: updatedItems,
+                 [newFolderKey]: []
+             };
+             localStorage.setItem('grid_simulated_fs', JSON.stringify(next));
+             return next;
+         });
          setNewFolderInputName('');
          showToast(t(`Folderi "${trimmed}" u krijua me sukses!`, `Folder "${trimmed}" created successfully!`));
      };
@@ -6295,6 +6361,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                      delete next[key];
                  }
              });
+             localStorage.setItem('grid_simulated_fs', JSON.stringify(next));
              return next;
          });
          showToast(t(`U fshi folderi: ${name}`, `Deleted folder: ${name}`));
@@ -6858,29 +6925,35 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
                                {/* Note Area / Textarea */}
                                <div className="flex-1 relative overflow-hidden flex flex-col p-4 sm:p-6 bg-transparent">
-                                  <textarea
-                                     value={activeNote.content || ''}
-                                     onChange={(e) => {
-                                        const val = e.target.value;
-                                        const updated = secretList.map(item => {
-                                           if (item.id === activeNote.id) {
-                                              return {
-                                                 ...item,
-                                                 content: val,
-                                                 updatedAt: new Date().toISOString()
-                                              };
-                                           }
-                                           return item;
-                                        });
-                                        setSecretList(updated);
-                                        localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
-                                     }}
-                                     placeholder={t("Shkruani shënimet tuaja sekrete këtu...", "Write your secret notes here...")}
-                                     className={`w-full flex-1 bg-transparent resize-none focus:outline-none text-sm md:text-base leading-relaxed p-0 ${
-                                        isDark ? "text-zinc-200 placeholder-zinc-700" : "text-zinc-800 placeholder-zinc-400"
-                                     }`}
-                                     spellCheck={false}
-                                  />
+                                  <div className={`flex-1 flex flex-col p-4 sm:p-6 rounded-2xl border shadow-inner transition-colors ${
+                                     isDark 
+                                        ? 'bg-zinc-950/90 border-zinc-800' 
+                                        : 'bg-zinc-50 border-zinc-200'
+                                  }`}>
+                                     <textarea
+                                        value={activeNote.content || ''}
+                                        onChange={(e) => {
+                                           const val = e.target.value;
+                                           const updated = secretList.map(item => {
+                                              if (item.id === activeNote.id) {
+                                                 return {
+                                                    ...item,
+                                                    content: val,
+                                                    updatedAt: new Date().toISOString()
+                                                 };
+                                              }
+                                              return item;
+                                           });
+                                           setSecretList(updated);
+                                           localStorage.setItem('grid_notepad_secret_list', JSON.stringify(updated));
+                                        }}
+                                        placeholder={t("Shkruani shënimet tuaja sekrete këtu...", "Write your secret notes here...")}
+                                        className={`w-full flex-1 bg-transparent resize-none overflow-y-auto focus:outline-none text-base sm:text-lg leading-relaxed p-0 font-medium ${
+                                           isDark ? "text-white placeholder-zinc-700" : "text-zinc-900 placeholder-zinc-400"
+                                        }`}
+                                        spellCheck={false}
+                                     />
+                                  </div>
                                   
                                   {/* Counts footer */}
                                   <div className="flex items-center justify-end border-t dark:border-zinc-800/50 pt-3 mt-3 text-[10px] text-zinc-400 font-mono shrink-0">
@@ -7735,7 +7808,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                    readOnly
                    value={debugLogs.length === 0 ? "Nuk ka asnjë log të regjistruar deri tani. Kryeni një aksion ose dërgoni pyetje te AI për të parë historikun." : debugLogs.join('\n')}
                    onClick={(e) => e.currentTarget.select()}
-                   className={`w-full h-72 p-3.5 rounded-xl border text-xs font-mono resize-none focus:outline-none leading-relaxed ${
+                   className={`w-full h-72 p-3.5 rounded-xl border text-xs font-mono resize-none overflow-y-auto focus:outline-none leading-relaxed ${
                       isDark ? "bg-zinc-950 border-zinc-800 text-emerald-400" : "bg-zinc-900 border-zinc-700 text-emerald-300"
                    }`}
                 />
@@ -7750,16 +7823,10 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                          <Copy className="w-4 h-4" /> Kopjo Të Gjitha (Select All TXT)
                       </button>
 
-                      <button onClick={() => {
+                      <button onClick={async () => {
                          if (debugLogs.length === 0) return showToast("Nuk ka log-e për t'u shkarkuar.");
                          const blob = new Blob([debugLogs.join('\n')], { type: 'text/plain;charset=utf-8' });
-                         const url = URL.createObjectURL(blob);
-                         const a = document.createElement('a');
-                         a.href = url;
-                         a.download = `logcat_debug_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.txt`;
-                         a.click();
-                         URL.revokeObjectURL(url);
-                         showToast("💾 Skedari logcat .txt u shkarkua me sukses!");
+                         await handleDownload(blob, `logcat_debug_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.txt`, 'text/plain', 'Logcat Debug');
                       }} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-md">
                          <Download className="w-4 h-4" /> Shkarko TXT
                       </button>
@@ -9253,131 +9320,444 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 </button>
              </div>
             
-            <div className="relative w-full">
-               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-               <input 
-                  value={catalogSearch}
-                  onChange={(e) => setCatalogSearch(e.target.value)}
-                  placeholder={t("Kërko dokumente ose tekst brenda tyre...", "Search documents or text inside them...")}
-                  className={`w-full pl-9 pr-4 py-1.5 text-sm rounded-lg border focus:outline-none focus:border-accent-500 transition-colors ${
-                     isDark ? "bg-zinc-800 border-zinc-700 text-white placeholder-zinc-500" : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400"
+            {/* SEGMENTED TAB SELECTOR: LISTA OSE ETIKETA */}
+            <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-850/60 rounded-xl border border-zinc-200/60 dark:border-zinc-800 mt-1 shrink-0">
+               <button
+                  onClick={() => { setMainTab('lista'); setSelectedLabelFolder(null); }}
+                  className={`flex-grow flex items-center justify-center gap-1.5 py-1.5 text-xs font-bold rounded-lg transition-all active:scale-95 ${
+                     mainTab === 'lista'
+                        ? "bg-accent-500 text-white shadow-md shadow-accent-500/15"
+                        : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/50 dark:hover:bg-zinc-800"
                   }`}
-               />
+               >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-amber-500" />
+                  {t("Lista", "Lists")} ({documents.length})
+               </button>
+               <button
+                  onClick={() => setMainTab('etiketa')}
+                  className={`flex-grow flex items-center justify-center gap-1.5 py-1.5 text-xs font-bold rounded-lg transition-all active:scale-95 ${
+                     mainTab === 'etiketa'
+                        ? "bg-accent-500 text-white shadow-md shadow-accent-500/15"
+                        : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/50 dark:hover:bg-zinc-800"
+                  }`}
+               >
+                  <Tag className="w-3.5 h-3.5 text-blue-500" />
+                  {t("Etiketa", "Labels")} ({customLabels.length})
+               </button>
             </div>
-            {allAvailableTags.length > 0 && (
-               <div className="flex flex-wrap gap-1.5 mt-3 pb-2 border-b border-zinc-200 dark:border-zinc-800">
-                  <button
-                     onClick={() => setSelectedTag(null)}
-                     className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all flex items-center gap-1 border ${
-                        selectedTag === null
-                           ? "bg-accent-500 text-white border-accent-500 shadow-sm"
-                           : isDark 
-                              ? "bg-zinc-850 border-zinc-700 text-zinc-300 hover:bg-zinc-750" 
-                              : "bg-zinc-100 border-zinc-200 text-zinc-600 hover:bg-zinc-200"
-                     }`}
-                  >
-                     <span>{t("Të gjitha", "All")}</span>
-                     <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                        selectedTag === null 
-                           ? "bg-white/25 text-white" 
-                           : isDark ? "bg-zinc-750 text-zinc-400" : "bg-white text-zinc-500"
-                     }`}>
-                        {documents.length}
-                     </span>
-                  </button>
-                  {allAvailableTags.map(tag => {
-                     const count = documents.filter(doc => (doc.tags || []).includes(tag)).length;
-                     return (
+            
+            {/* If Lista Tab, show Search and Dynamic Tags */}
+            {mainTab === 'lista' && (
+               <>
+                  <div className="relative w-full mt-1 shrink-0">
+                     <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                     <input 
+                        value={catalogSearch}
+                        onChange={(e) => setCatalogSearch(e.target.value)}
+                        placeholder={t("Kërko dokumente ose tekst brenda tyre...", "Search documents or text inside them...")}
+                        className={`w-full pl-9 pr-4 py-1.5 text-sm rounded-lg border focus:outline-none focus:border-accent-500 transition-colors ${
+                           isDark ? "bg-zinc-800 border-zinc-700 text-white placeholder-zinc-500" : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400"
+                        }`}
+                     />
+                  </div>
+                  {allAvailableTags.length > 0 && (
+                     <div className="flex flex-wrap gap-1.5 mt-2 pb-1 border-b border-zinc-200 dark:border-zinc-850 shrink-0">
                         <button
-                           key={tag}
-                           onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
-                           className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all flex items-center gap-1 border ${
-                              selectedTag === tag
+                           onClick={() => setSelectedTag(null)}
+                           className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all flex items-center gap-1 border ${
+                              selectedTag === null
                                  ? "bg-accent-500 text-white border-accent-500 shadow-sm"
                                  : isDark 
                                     ? "bg-zinc-850 border-zinc-700 text-zinc-300 hover:bg-zinc-750" 
                                     : "bg-zinc-100 border-zinc-200 text-zinc-600 hover:bg-zinc-200"
                            }`}
                         >
-                           <Tag className="w-3 h-3 opacity-70" />
-                           <span>#{tag}</span>
-                           <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                              selectedTag === tag 
+                           <span>{t("Të gjitha", "All")}</span>
+                           <span className={`text-[9px] px-1.5 py-0.2 rounded-full ${
+                              selectedTag === null 
                                  ? "bg-white/25 text-white" 
                                  : isDark ? "bg-zinc-750 text-zinc-400" : "bg-white text-zinc-500"
                            }`}>
-                              {count}
+                              {documents.length}
                            </span>
                         </button>
-                     );
-                  })}
-               </div>
+                        {allAvailableTags.map(tag => {
+                           const count = documents.filter(doc => (doc.tags || []).includes(tag)).length;
+                           return (
+                              <button
+                                 key={tag}
+                                 onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                                 className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all flex items-center gap-1 border ${
+                                    selectedTag === tag
+                                       ? "bg-accent-500 text-white border-accent-500 shadow-sm"
+                                       : isDark 
+                                          ? "bg-zinc-850 border-zinc-700 text-zinc-300 hover:bg-zinc-750" 
+                                          : "bg-zinc-100 border-zinc-200 text-zinc-600 hover:bg-zinc-200"
+                                 }`}
+                              >
+                                 <Tag className="w-2.5 h-2.5 opacity-70" />
+                                 <span>#{tag}</span>
+                                 <span className={`text-[9px] px-1.5 py-0.2 rounded-full ${
+                                    selectedTag === tag 
+                                       ? "bg-white/25 text-white" 
+                                       : isDark ? "bg-zinc-750 text-zinc-400" : "bg-white text-zinc-500"
+                                 }`}>
+                                    {count}
+                                 </span>
+                              </button>
+                           );
+                        })}
+                     </div>
+                  )}
+               </>
             )}
          </div>
          
          <div className={`p-4 sm:p-5 flex-1 overflow-y-auto w-full max-w-full`}>
-            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
-                  {/* KRIJO KARTËN E RE */}
-                  <button 
-                    onClick={() => createNewDocument()}
-                    className={`flex items-center gap-2.5 p-2 border-2 border-dashed rounded-xl transition-all active:scale-95 text-left ${
-                      isDark 
-                        ? "border-zinc-700 hover:border-accent-500/80 bg-zinc-900/30 hover:bg-zinc-900/60" 
-                        : "border-zinc-300 hover:border-accent-500/80 bg-zinc-50 hover:bg-zinc-100"
-                    }`}
-                  >
-                    <div className="p-1.5 bg-accent-500/10 rounded-lg">
-                       <Plus className="w-4 h-4 text-accent-500" />
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                       <span className={`text-sm font-bold ${textColor}`}>{t('Krijo të Re', 'Create New')}</span>
-                       <span className={`text-[10px] font-medium leading-tight ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{t('Strukturë me 90 Rrjeshta', '90 Rows Structure')}</span>
-                    </div>
-                  </button>
+            {mainTab === 'lista' ? (
+               <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+                     {/* KRIJO KARTËN E RE */}
+                     <button 
+                       onClick={() => createNewDocument()}
+                       className={`flex items-center gap-2.5 p-2 border-2 border-dashed rounded-xl transition-all active:scale-95 text-left ${
+                         isDark 
+                           ? "border-zinc-700 hover:border-accent-500/80 bg-zinc-900/30 hover:bg-zinc-900/60" 
+                           : "border-zinc-300 hover:border-accent-500/80 bg-zinc-50 hover:bg-zinc-100"
+                       }`}
+                     >
+                       <div className="p-1.5 bg-accent-500/10 rounded-lg">
+                          <Plus className="w-4 h-4 text-accent-500" />
+                       </div>
+                       <div className="flex flex-col gap-0.5">
+                          <span className={`text-sm font-bold ${textColor}`}>{t('Krijo të Re', 'Create New')}</span>
+                          <span className={`text-[10px] font-medium leading-tight text-zinc-500`}>{t('Strukturë me 90 Rrjeshta', '90 Rows Structure')}</span>
+                       </div>
+                     </button>
 
-                  {/* LISTA E DOKUMENTEVE */}
-                  {filteredDocs.length === 0 ? (
-                     <div className={`col-span-full text-center py-10 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-                       {t('Asnjë dokument nuk u gjet.', 'No documents found.')}
-                     </div>
-                  ) : filteredDocs.map(doc => (
-                     <div key={doc.id} onClick={() => openDocument(doc)} className={`flex items-center justify-between p-2 border rounded-xl cursor-pointer transition-all hover:translate-x-1 ${
-                        isDark ? "bg-zinc-900 border-zinc-800 hover:border-zinc-600 shadow-sm" : "bg-white border-zinc-200 hover:border-zinc-400 shadow-sm"
-                     }`}>
-                        <div className="flex flex-col flex-1 shadow-none min-w-0 pr-2 gap-0.5">
-                           <h3 className={`font-bold text-sm truncate ${textColor}`}>{doc.title}</h3>
-                           <div className={`flex flex-row flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
-                              <span className="flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.createdAt, 'dd MMM yyyy')}</span>
-                              <span className="flex items-center gap-0.5"><Save className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.updatedAt, 'HH:mm')}</span>
-                           </div>
-                           {(doc.tags && doc.tags.length > 0) && (
-                              <div className="flex flex-wrap gap-1 mt-0.5">
-                                 {doc.tags.map(tag => (
-                                    <span key={tag} className={`px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all ${getTagColors(tag)}`}>
-                                       #{tag}
-                                    </span>
-                                 ))}
+                     {/* LISTA E DOKUMENTEVE */}
+                     {filteredDocs.length === 0 ? (
+                        <div className={`col-span-full text-center py-10 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                          {t('Asnjë dokument nuk u gjet.', 'No documents found.')}
+                        </div>
+                     ) : filteredDocs.map(doc => (
+                        <div key={doc.id} onClick={() => openDocument(doc)} className={`flex items-center justify-between p-2 border rounded-xl cursor-pointer transition-all hover:translate-x-1 ${
+                           isDark ? "bg-zinc-900 border-zinc-800 hover:border-zinc-600 shadow-sm" : "bg-white border-zinc-200 hover:border-zinc-400 shadow-sm"
+                        }`}>
+                           <div className="flex flex-col flex-1 shadow-none min-w-0 pr-2 gap-0.5">
+                              <h3 className={`font-bold text-sm truncate ${textColor}`}>{doc.title}</h3>
+                              <div className={`flex flex-row flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500`}>
+                                 <span className="flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.createdAt, 'dd MMM yyyy')}</span>
+                                 <span className="flex items-center gap-0.5"><Save className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.updatedAt, 'HH:mm')}</span>
                               </div>
-                           )}
+                              {(doc.tags && doc.tags.length > 0) && (
+                                 <div className="flex flex-wrap gap-1 mt-0.5">
+                                    {doc.tags.map(tag => (
+                                       <span key={tag} className={`px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all ${getTagColors(tag)}`}>
+                                          #{tag}
+                                       </span>
+                                    ))}
+                                 </div>
+                              )}
+                           </div>
+                           <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                              {/* Transfer List button */}
+                              <button
+                                 onClick={() => setTransferDocId(doc.id)}
+                                 className={`p-2 rounded-lg text-zinc-400 hover:text-blue-500 transition-colors ${isDark ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}
+                                 title={t("Transfero te Etiketa", "Transfer to Label")}
+                              >
+                                 <FolderOpen className="w-4 h-4" />
+                              </button>
+
+                              {/* Delete Button */}
+                              <button 
+                                 onClick={() => { 
+                                    executeProtectedAction(() => {
+                                       setDocToDelete(doc.id);
+                                    });
+                                 }} 
+                                 className={`p-2 rounded-lg text-zinc-500 hover:text-red-500 active:text-red-600 active:bg-red-500/10 transition-colors ${isDark ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}
+                              >
+                                 <Trash2 className="w-4 h-4 pointer-events-none" />
+                              </button>
+                           </div>
                         </div>
-                        <div className="flex items-center gap-0.5 shrink-0">
-                           <button 
-                              onClick={(e) => { 
-                                 e.preventDefault(); 
-                                 e.stopPropagation(); 
-                                 executeProtectedAction(() => {
-                                    setDocToDelete(doc.id);
-                                 });
-                              }} 
-                              className={`p-2 rounded-lg text-zinc-500 hover:text-red-500 active:text-red-600 active:bg-red-500/10 transition-colors ${isDark ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}
+                     ))}
+                  </div>
+            ) : (
+               /* TAB ETIKETA */
+               selectedLabelFolder === null ? (
+                  /* LABELS LIST VIEW */
+                  <div className="flex flex-col gap-4 animate-in fade-in duration-200">
+                     <div className="flex justify-between items-center mb-1">
+                        <h3 className={`text-sm font-extrabold tracking-tight ${textColor}`}>
+                           {t("Etiketat e Personalizuara", "Custom Labels")}
+                        </h3>
+                        <button
+                           onClick={handleAddCustomLabel}
+                           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-accent-500 hover:bg-accent-600 text-white rounded-lg active:scale-95 transition-all shadow-md shadow-accent-500/10"
+                        >
+                           <Plus className="w-3.5 h-3.5" />
+                           {t("Shto Etiketë", "Add Label")}
+                        </button>
+                     </div>
+                     
+                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        {customLabels.map((label, idx) => {
+                           // Count how many documents belong to this label
+                           const labelDocsCount = documents.filter(doc => doc.tags && doc.tags.includes(label)).length;
+                           return (
+                              <div
+                                 key={label}
+                                 className={`p-4 rounded-2xl border transition-all hover:border-accent-500/50 cursor-pointer flex flex-col justify-between h-[110px] hover:-translate-y-0.5 shadow-sm hover:shadow ${
+                                    isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"
+                                 }`}
+                                 onClick={() => setSelectedLabelFolder(label)}
+                              >
+                                 <div className="flex items-start justify-between">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                       <div className="p-2 bg-blue-500/10 text-blue-500 rounded-xl shrink-0">
+                                          <Tag className="w-5 h-5" />
+                                       </div>
+                                       <div className="flex flex-col min-w-0">
+                                          <span className={`text-sm font-bold truncate ${textColor}`}>{label}</span>
+                                          <span className="text-[10px] text-zinc-500 font-semibold mt-0.5">
+                                             {labelDocsCount === 1 
+                                                ? t("1 Listë", "1 List") 
+                                                : t(`${labelDocsCount} Lista`, `${labelDocsCount} Lists`)}
+                                          </span>
+                                       </div>
+                                    </div>
+                                 </div>
+
+                                 <div className="flex items-center justify-between border-t border-zinc-500/10 pt-2 mt-2" onClick={(e) => e.stopPropagation()}>
+                                    <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider">{t("Aksesoni Listat", "Access Lists")} &rarr;</span>
+                                    <div className="flex items-center gap-1">
+                                       <button
+                                          onClick={() => handleRenameCustomLabel(idx)}
+                                          className={`p-1.5 rounded-lg text-zinc-400 hover:text-blue-500 hover:bg-blue-500/10 transition-colors`}
+                                          title={t("Ndrysho emrin", "Rename label")}
+                                       >
+                                          <Edit className="w-3.5 h-3.5" />
+                                       </button>
+                                       <button
+                                          onClick={() => handleDeleteCustomLabel(idx)}
+                                          className={`p-1.5 rounded-lg text-zinc-400 hover:text-red-500 hover:bg-red-500/10 transition-colors`}
+                                          title={t("Fshi etiketën", "Delete label")}
+                                       >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                 </div>
+                              </div>
+                           );
+                        })}
+                        
+                        {customLabels.length === 0 && (
+                           <div className={`col-span-full text-center py-12 text-xs italic ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                              {t("Nuk ka etiketa të krijuara. Krijoni një etiketë të re.", "No labels created. Create a new label.")}
+                           </div>
+                        )}
+                     </div>
+                  </div>
+               ) : (
+                  /* INSIDE LABEL VIEW */
+                  <div className="flex flex-col gap-4 animate-in fade-in duration-200">
+                     {/* Header / Breadcrumb */}
+                     <div className="flex items-center justify-between border-b pb-3 border-zinc-500/10 mb-2">
+                        <div className="flex items-center gap-2.5">
+                           <button
+                              onClick={() => setSelectedLabelFolder(null)}
+                              className={`p-2 rounded-xl transition-colors border ${
+                                 isDark ? "bg-zinc-900 border-zinc-800 hover:bg-zinc-800 text-zinc-300" : "bg-white border-zinc-200 hover:bg-zinc-100 text-zinc-700"
+                              }`}
+                              title={t("Kthehu mbrapa", "Go back")}
                            >
-                              <Trash2 className="w-4 h-4 pointer-events-none" />
+                              <ArrowLeft className="w-4 h-4" />
                            </button>
+                           <div className="flex flex-col">
+                              <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 uppercase font-bold tracking-wider">
+                                 <span>{t("Etiketat", "Labels")}</span>
+                                 <ChevronRight className="w-2.5 h-2.5" />
+                                 <span className="text-zinc-400">{selectedLabelFolder}</span>
+                              </div>
+                              <h3 className={`text-base font-extrabold ${textColor}`}>
+                                 {selectedLabelFolder}
+                              </h3>
+                           </div>
                         </div>
                      </div>
-                  ))}
-               </div>
+                     
+                     <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+                        {/* Create list in this label */}
+                        <button 
+                           onClick={() => createNewDocument([selectedLabelFolder])}
+                           className={`flex items-center gap-2.5 p-2 border-2 border-dashed rounded-xl transition-all active:scale-95 text-left ${
+                              isDark 
+                                 ? "border-zinc-700 hover:border-accent-500/80 bg-zinc-900/30 hover:bg-zinc-900/60" 
+                                 : "border-zinc-300 hover:border-accent-500/80 bg-zinc-50 hover:bg-zinc-100"
+                           }`}
+                        >
+                           <div className="p-1.5 bg-accent-500/10 rounded-lg">
+                              <Plus className="w-4 h-4 text-accent-500" />
+                           </div>
+                           <div className="flex flex-col gap-0.5">
+                              <span className={`text-sm font-bold ${textColor}`}>{t('Krijo të Re', 'Create New')}</span>
+                              <span className={`text-[10px] font-medium leading-tight text-zinc-500`}>
+                                 {t('Auto-Kategorizuar', 'Auto-Categorized')}
+                              </span>
+                           </div>
+                        </button>
+                        
+                        {/* List of documents that belong to this label */}
+                        {documents.filter(doc => doc.tags && doc.tags.includes(selectedLabelFolder)).length === 0 ? (
+                           <div className={`col-span-full text-center py-10 text-xs italic ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                              {t("Nuk ka lista në këtë etiketë. Klikoni 'Krijo të Re' për të filluar ose transferoni një listë ekzistuese.", 
+                                 "No lists in this label. Click 'Create New' to start or transfer an existing list.")}
+                           </div>
+                        ) : (
+                           documents
+                              .filter(doc => doc.tags && doc.tags.includes(selectedLabelFolder))
+                              .map(doc => (
+                                 <div 
+                                    key={doc.id} 
+                                    onClick={() => openDocument(doc)} 
+                                    className={`flex items-center justify-between p-2 border rounded-xl cursor-pointer transition-all hover:translate-x-1 ${
+                                       isDark ? "bg-zinc-900 border-zinc-800 hover:border-zinc-600 shadow-sm" : "bg-white border-zinc-200 hover:border-zinc-400 shadow-sm"
+                                    }`}
+                                 >
+                                    <div className="flex flex-col flex-1 shadow-none min-w-0 pr-2 gap-0.5">
+                                       <h3 className={`font-bold text-sm truncate ${textColor}`}>{doc.title}</h3>
+                                       <div className={`flex flex-row flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500`}>
+                                          <span className="flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.createdAt, 'dd MMM yyyy')}</span>
+                                          <span className="flex items-center gap-0.5"><Save className="w-2.5 h-2.5 shrink-0" /> {safeFormatDate(doc.updatedAt, 'HH:mm')}</span>
+                                       </div>
+                                       {(doc.tags && doc.tags.length > 0) && (
+                                          <div className="flex flex-wrap gap-1 mt-0.5">
+                                             {doc.tags.map(tag => (
+                                                <span key={tag} className={`px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all ${getTagColors(tag)}`}>
+                                                   #{tag}
+                                                </span>
+                                             ))}
+                                          </div>
+                                       )}
+                                    </div>
+                                    <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                       {/* Transfer Button */}
+                                       <button
+                                          onClick={() => setTransferDocId(doc.id)}
+                                          className={`p-2 rounded-lg text-zinc-400 hover:text-blue-500 transition-colors ${isDark ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}
+                                          title={t("Transfero te Etiketa", "Transfer to Label")}
+                                       >
+                                          <FolderOpen className="w-4 h-4" />
+                                       </button>
+                                       {/* Delete Button */}
+                                       <button 
+                                          onClick={() => { 
+                                             executeProtectedAction(() => {
+                                                setDocToDelete(doc.id);
+                                             });
+                                          }} 
+                                          className={`p-2 rounded-lg text-zinc-500 hover:text-red-500 active:text-red-600 active:bg-red-500/10 transition-colors ${isDark ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}
+                                       >
+                                          <Trash2 className="w-4 h-4 pointer-events-none" />
+                                       </button>
+                                    </div>
+                                 </div>
+                              ))
+                        )}
+                     </div>
+                  </div>
+               )
+            )}
          </div>
+
+         {/* TRANSFER MODAL */}
+         {transferDocId && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[130] p-4 animate-in fade-in duration-200">
+               <div className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl animate-in zoom-in-95 duration-200 ${
+                  isDark ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-200 text-zinc-900"
+               }`}>
+                  <div className="flex justify-between items-center mb-4">
+                     <h3 className="font-bold text-sm flex items-center gap-1.5">
+                        <FolderOpen className="w-4 h-4 text-blue-500" />
+                        {t("Transfero te Etiketa", "Transfer to Label")}
+                     </h3>
+                     <button onClick={() => setTransferDocId(null)} className="p-1 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500">
+                        <X className="w-4 h-4" />
+                     </button>
+                  </div>
+                  
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-4 leading-relaxed">
+                     {t("Zgjidhni etiketën ku dëshironi të transferoni/kategorizoni këtë listë. Struktura dhe të dhënat mbeten të pandryshuara.", 
+                        "Select the label where you want to transfer/categorize this list. The structure and data will remain unchanged.")}
+                  </p>
+                  
+                  <div className="space-y-1.5 max-h-[200px] overflow-y-auto mb-4 scrollbar-hide">
+                     {customLabels.map(label => {
+                        const doc = documents.find(d => d.id === transferDocId);
+                        const isAssigned = doc?.tags?.includes(label);
+                        return (
+                           <button
+                              key={label}
+                              onClick={() => {
+                                 const updatedDocs = documents.map(d => {
+                                    if (d.id === transferDocId) {
+                                       const tags = d.tags || [];
+                                       const newTags = tags.includes(label) ? tags.filter(tItem => tItem !== label) : [...tags, label];
+                                       return { ...d, tags: newTags };
+                                    }
+                                    return d;
+                                 });
+                                 setDocuments(updatedDocs);
+                                 triggerAutoSave(updatedDocs);
+                                 setTransferDocId(null);
+                                 showToast(t("Lista u transferua me sukses!", "List successfully transferred!"));
+                              }}
+                              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-bold transition-all border ${
+                                 isAssigned 
+                                    ? "bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400" 
+                                    : isDark 
+                                       ? "bg-zinc-850 border-zinc-750/50 hover:bg-zinc-800 text-zinc-300" 
+                                       : "bg-zinc-50 border-zinc-200 hover:bg-zinc-100 text-zinc-700"
+                              }`}
+                           >
+                              <span className="flex items-center gap-1.5">
+                                 <Tag className="w-3.5 h-3.5 text-blue-500" />
+                                 {label}
+                              </span>
+                              {isAssigned && <Check className="w-4 h-4 text-blue-500" />}
+                           </button>
+                        );
+                     })}
+                     
+                     {customLabels.length === 0 && (
+                        <div className="text-center py-6 text-xs text-zinc-500 italic">
+                           {t("Nuk ka etiketa të krijuara. Krijoni një etiketë së pari.", "No labels created. Create a label first.")}
+                        </div>
+                     )}
+                  </div>
+                  
+                  <div className="flex gap-2">
+                     <button
+                        onClick={() => {
+                           setTransferDocId(null);
+                           handleAddCustomLabel();
+                        }}
+                        className="flex-1 py-2 rounded-xl text-xs font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 border dark:border-zinc-700 active:scale-95 transition-all"
+                     >
+                        + {t("Shto Etiketë", "Add Label")}
+                     </button>
+                     <button
+                        onClick={() => setTransferDocId(null)}
+                        className="flex-1 py-2 rounded-xl text-xs font-bold bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-300 dark:hover:bg-zinc-650 active:scale-95 transition-all"
+                     >
+                        {t("Mbyll", "Close")}
+                     </button>
+                  </div>
+               </div>
+            </div>
+         )}
 
          {/* TOAST CUSTOM */}
          {toastMessage && (
@@ -10105,7 +10485,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                           updateCell(activeCell.rIndex, activeCell.colKey, val);
                       }}
                       placeholder="Zgjero shënimet e tua dhe shkruaj lirshëm këtu..."
-                      className={`w-full h-full bg-transparent resize-none focus:outline-none text-base leading-relaxed scrollbar-hide ${
+                      className={`w-full h-full bg-transparent resize-none focus:outline-none text-base leading-relaxed overflow-y-auto ${
                         (rows[activeCell.rIndex]?.status === 'lock' || rows[activeCell.rIndex]?.status === 'ok' || rows[activeCell.rIndex]?.status === 'blue' || rows[activeCell.rIndex]?.status === 'x')
                            ? (isDark ? "text-amber-500/90 cursor-default" : "text-amber-600/90 cursor-default")
                            : (isDark ? "text-zinc-200 placeholder-zinc-700" : "text-zinc-800 placeholder-zinc-400")
