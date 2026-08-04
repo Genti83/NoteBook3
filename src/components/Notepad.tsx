@@ -705,15 +705,27 @@ export function Notepad() {
 
   const addFileToSimulatedFilesystem = (fileName: string, fileSize: number) => {
     setSimulatedFilesystem(prev => {
-      const currentFolderKey = activeProvider + (currentPath.length > 0 ? '/' + currentPath.join('/') : '');
+      const baseDir = localStorage.getItem('grid_android_base_dir') || androidBaseDir || 'Memoria e Telefonit';
+      const folderStr = localStorage.getItem('grid_folder_name') !== null ? localStorage.getItem('grid_folder_name')! : folderName;
+      const currentFolderKey = baseDir + (folderStr ? '/' + folderStr : '');
       const currentItems = prev[currentFolderKey] || [];
       if (currentItems.some(item => item.name === fileName)) {
         return prev;
       }
+
+      const formatBytes = (bytes: number) => {
+        if (!bytes) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+      };
+
       const newItem = {
         name: fileName,
-        size: fileSize,
-        updatedAt: new Date().toISOString()
+        size: formatBytes(fileSize),
+        date: new Date().toLocaleDateString('sq-AL', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + new Date().toLocaleTimeString('sq-AL', { hour: '2-digit', minute: '2-digit' }),
+        type: 'file'
       };
       return {
         ...prev,
@@ -9373,10 +9385,10 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                             onClick={() => {
                                                 setShowStoragePickerModal(true);
                                                 setActiveProvider('Memoria e Telefonit');
-                                                setCurrentPath(['Dosja']);
+                                                setCurrentPath([]);
                                                 setDownloadMethod("folder");
                                                 localStorage.setItem("grid_download_method", "folder");
-                                                showToast(t("U hap Memoria e Telefonit. Përzgjidhni dosjen 'Dosja' për të vazhduar!", "Opened Phone Storage. Select 'Dosja' folder to continue!"));
+                                                showToast(t("U hap Memoria e Telefonit. Përzgjidhni çfarëdo dosje për të ruajtur dokumentet!", "Opened Phone Storage. Select any folder to save the documents!"));
                                             }} 
                                             className={`flex-1 min-w-[200px] px-4 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 border shadow-md active:scale-95 ${
                                                 isDark 
@@ -9755,28 +9767,28 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                         </button>
                      </div>
                      
-                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 animate-in fade-in duration-350">
+                     <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 gap-2.5 sm:gap-4 animate-in fade-in duration-350">
                         {customLabels.length > 0 && (
                            /* KRIJO KARTËN E ETIKETËS RE BRENDA GRIDIT */
                            <button 
                               type="button"
                               onClick={handleAddCustomLabel}
-                              className={`p-4 rounded-2xl border-2 border-dashed transition-all active:scale-95 text-left flex items-center justify-between h-[84px] ${
+                              className={`p-2.5 sm:p-4 rounded-2xl border-2 border-dashed transition-all active:scale-95 text-left flex items-center justify-between h-[80px] sm:h-[84px] ${
                                 isDark 
                                   ? "border-zinc-800 hover:border-orange-500 bg-zinc-900/30 hover:bg-zinc-900/60 text-zinc-400 hover:text-orange-500" 
                                   : "border-zinc-200 hover:border-orange-500 bg-zinc-50 hover:bg-orange-50/10 text-zinc-500 hover:text-orange-600"
                               }`}
                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                 <div className="p-2.5 bg-orange-500/10 text-orange-500 rounded-xl shrink-0 inline-flex items-center justify-center w-10 h-10 shadow-inner">
-                                    <Plus className="w-5 h-5" />
+                              <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
+                                 <div className="p-1.5 sm:p-2.5 bg-orange-500/10 text-orange-500 rounded-xl shrink-0 inline-flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 shadow-inner">
+                                    <Plus className="w-4 h-4 sm:w-5 h-5" />
                                  </div>
                                  <div className="flex flex-col gap-0.5 min-w-0">
-                                    <span className="text-xs sm:text-sm font-extrabold truncate">{t('Krijo Etiketë', 'Create Label')}</span>
-                                    <span className="text-[10px] text-zinc-500 leading-tight font-semibold">{t('Shto kategori', 'Add category')}</span>
+                                    <span className="text-[11px] sm:text-xs md:text-sm font-extrabold truncate">{t('Krijo', 'Create')}</span>
+                                    <span className="text-[9px] text-zinc-500 leading-tight font-semibold truncate">{t('Etiketë', 'Label')}</span>
                                  </div>
                               </div>
-                              <Plus className="w-4 h-4 text-zinc-400 shrink-0" />
+                              <Plus className="w-3.5 h-3.5 text-zinc-400 shrink-0 hidden sm:block" />
                            </button>
                         )}
 
@@ -9786,27 +9798,27 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                            return (
                               <div
                                  key={label}
-                                 className={`p-4 rounded-2xl border transition-all hover:-translate-y-1 cursor-pointer flex items-center justify-between h-[84px] shadow-sm hover:shadow-lg ${
+                                 className={`p-2.5 sm:p-4 rounded-2xl border transition-all hover:-translate-y-1 cursor-pointer flex items-center justify-between h-[80px] sm:h-[84px] shadow-sm hover:shadow-lg ${
                                     isDark 
                                        ? "bg-zinc-900 border-zinc-800 hover:border-orange-500/50 hover:bg-zinc-850" 
                                        : "bg-white border-zinc-200 hover:border-orange-500/50 hover:bg-orange-50/10"
                                  }`}
                                  onClick={() => setSelectedLabelFolder(label)}
                               >
-                                 <div className="flex items-center gap-3 min-w-0">
-                                    <div className="p-2.5 bg-orange-500/10 text-orange-500 rounded-xl shrink-0 w-10 h-10 flex items-center justify-center shadow-inner">
-                                       <FolderOpen className="w-5 h-5" />
+                                 <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
+                                    <div className="p-1.5 sm:p-2.5 bg-orange-500/10 text-orange-500 rounded-xl shrink-0 w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center shadow-inner">
+                                       <FolderOpen className="w-4 h-4 sm:w-5 h-5" />
                                     </div>
                                     <div className="flex flex-col min-w-0">
-                                       <span className={`text-xs sm:text-sm font-extrabold truncate ${textColor}`} title={label}>{label}</span>
-                                       <span className="text-[10px] text-zinc-500 font-semibold mt-0.5">
+                                       <span className={`text-[11px] sm:text-xs md:text-sm font-extrabold truncate ${textColor}`} title={label}>{label}</span>
+                                       <span className="text-[9px] text-zinc-500 font-semibold mt-0.5 truncate">
                                           {labelDocsCount === 1 
                                              ? t("1 Listë", "1 List") 
                                              : t(`${labelDocsCount} Lista`, `${labelDocsCount} Lists`)}
                                        </span>
                                     </div>
                                  </div>
-                                 <ChevronRight className="w-4 h-4 text-zinc-400 shrink-0" />
+                                 <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0 hidden sm:block" />
                               </div>
                            );
                         })}
