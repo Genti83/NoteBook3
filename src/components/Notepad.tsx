@@ -599,6 +599,79 @@ export function Notepad() {
     localStorage.setItem('grid_simulated_fs', JSON.stringify(simulatedFilesystem));
   }, [simulatedFilesystem]);
 
+  React.useEffect(() => {
+    if (!showStoragePickerModal) return;
+    
+    const syncRealFilesWithSimulated = async () => {
+      if (!Capacitor.isNativePlatform()) return;
+      try {
+         try {
+            await Filesystem.requestPermissions();
+         } catch (pErr) {}
+
+         const currentFolderKey = activeProvider + (currentPath.length > 0 ? '/' + currentPath.join('/') : '');
+         
+         // Map the activeProvider to a Capacitor Directory
+         let directory = Directory.Documents;
+         if (activeProvider === 'SD card') {
+            directory = Directory.External;
+         } else if (activeProvider === 'Cache') {
+            directory = Directory.Cache;
+         } else if (activeProvider === 'Downloads') {
+            directory = Directory.Documents;
+         } else {
+            return;
+         }
+
+         const pathStr = currentPath.join('/');
+         
+         const readdirResult = await Filesystem.readdir({
+            path: pathStr,
+            directory: directory
+         });
+
+         const realItems = readdirResult.files.map(file => {
+            let sizeLabel = '0 B';
+            if (file.size !== undefined) {
+               if (file.size > 1024 * 1024) {
+                  sizeLabel = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+               } else if (file.size > 1024) {
+                  sizeLabel = `${(file.size / 1024).toFixed(1)} KB`;
+               } else {
+                  sizeLabel = `${file.size} B`;
+               }
+            }
+            return {
+               name: file.name,
+               type: file.type === 'directory' ? 'folder' : 'file',
+               size: sizeLabel,
+               date: new Date().toLocaleDateString('sq-AL'),
+               isRealDeviceFile: true
+            };
+         });
+
+         setSimulatedFilesystem(prev => {
+            const currentList = prev[currentFolderKey] || [];
+            const filteredSimulated = currentList.filter(item => !item.isRealDeviceFile);
+            
+            const finalRealItems = realItems.filter(rItem => {
+               return !filteredSimulated.some(sItem => sItem.name === rItem.name);
+            });
+
+            const merged = [...filteredSimulated, ...finalRealItems];
+            return {
+               ...prev,
+               [currentFolderKey]: merged
+            };
+         });
+      } catch (err) {
+         console.warn("Real filesystem sync notice:", err);
+      }
+    };
+
+    syncRealFilesWithSimulated();
+  }, [showStoragePickerModal, activeProvider, currentPath]);
+
   const [storageSearchQuery, setStorageSearchQuery] = React.useState<string>('');
   const [newFolderInputName, setNewFolderInputName] = React.useState<string>('');
 
@@ -2229,8 +2302,32 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
    const handleLoadFileFromSimulatedStorage = async (item: any) => {
       if (!item || !item.name) return;
       try {
-         let content = item.content || '';
+         let content = '';
          const name = item.name;
+         
+         if (item.isRealDeviceFile && Capacitor.isNativePlatform()) {
+            try {
+               let directory = Directory.Documents;
+               if (activeProvider === 'SD card') {
+                  directory = Directory.External;
+               } else if (activeProvider === 'Cache') {
+                  directory = Directory.Cache;
+               }
+               const fileFullPath = currentPath.length > 0 ? `${currentPath.join('/')}/${name}` : name;
+               const readRes = await Filesystem.readFile({
+                  path: fileFullPath,
+                  directory: directory,
+                  encoding: 'utf8' as any
+               });
+               content = readRes.data as string;
+            } catch (readErr) {
+               console.error("Could not read physically:", readErr);
+               showToast(t("Dështoi leximi fizik, u përdor përmbajtja e simuluar", "Failed physical read, using simulated content"));
+               content = item.content || '';
+            }
+         } else {
+            content = item.content || '';
+         }
          
          // Generate mock content for initial pre-populated files if empty
          if (!content) {
@@ -2309,6 +2406,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                   const parts = line.split(',');
                   return {
                      id: (idx + 1).toString(),
+                      status: 'none' as const,
                      col1: parts[0] || '',
                      col2: parts[1] || '',
                      col3: parts[2] || ''
@@ -2337,6 +2435,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
             const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
             const rowsToUse = lines.map((line, idx) => ({
                id: (idx + 1).toString(),
+                status: 'none' as const,
                col1: line,
                col2: '',
                col3: ''
@@ -2344,7 +2443,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
             const newDoc = {
                id: 'txt_' + Date.now(),
                title: name.replace('.txt', ''),
-               rows: rowsToUse.length > 0 ? rowsToUse : [{ id: '1', col1: content, col2: '', col3: '' }],
+               rows: rowsToUse.length > 0 ? rowsToUse : [{ id: '1', status: 'none' as const, col1: content, col2: '', col3: '' }],
                headers: [t('Shënim', 'Note'), '', ''],
                tags: [],
                createdAt: new Date().toISOString(),
@@ -6634,53 +6733,99 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
      };
 
      const handleCreateFolder = (name: string) => {
-         const trimmed = name.trim();
-         if (!trimmed) return;
-         const currentKey = currentFolderKey;
-         const items = simulatedFilesystem[currentKey] || [];
-         if (items.some(item => item.name.toLowerCase() === trimmed.toLowerCase() && item.type === 'folder')) {
-             showToast(t('Ky folder ekziston tashmë!', 'This folder already exists!'));
-             return;
-         }
-         const updatedItems = [
-             ...items,
-             { name: trimmed, type: 'folder' }
-         ];
-         const newFolderKey = currentKey + '/' + trimmed;
-         setSimulatedFilesystem(prev => {
-             const next = {
-                 ...prev,
-                 [currentKey]: updatedItems,
-                 [newFolderKey]: []
-             };
-             localStorage.setItem('grid_simulated_fs', JSON.stringify(next));
+          const trimmed = name.trim();
+          if (!trimmed) return;
+          const currentKey = currentFolderKey;
+          const items = simulatedFilesystem[currentKey] || [];
+          if (items.some(item => item.name.toLowerCase() === trimmed.toLowerCase() && item.type === 'folder')) {
+              showToast(t('Ky folder ekziston tashmë!', 'This folder already exists!'));
+              return;
+          }
+
+          if (Capacitor.isNativePlatform()) {
+             try {
+                let directory = Directory.Documents;
+                if (activeProvider === 'SD card') {
+                   directory = Directory.External;
+                } else if (activeProvider === 'Cache') {
+                   directory = Directory.Cache;
+                }
+                const fullFolderNewPath = currentPath.length > 0 ? `${currentPath.join('/')}/${trimmed}` : trimmed;
+                Filesystem.mkdir({
+                   path: fullFolderNewPath,
+                   directory: directory,
+                   recursive: true
+                });
+             } catch (err) {
+                console.warn("Could not create physical folder:", err);
+             }
+          }
+
+          const updatedItems = [
+              ...items,
+              { name: trimmed, type: 'folder' }
+          ];
+          const newFolderKey = currentKey + '/' + trimmed;
+          setSimulatedFilesystem(prev => {
+              const next = {
+                  ...prev,
+                  [currentKey]: updatedItems,
+                  [newFolderKey]: []
+              };
              return next;
          });
          setNewFolderInputName('');
          showToast(t(`Folderi "${trimmed}" u krijua me sukses!`, `Folder "${trimmed}" created successfully!`));
      };
 
-     const handleDeleteItem = (name: string) => {
-         const currentKey = currentFolderKey;
-         const items = simulatedFilesystem[currentKey] || [];
-         const targetItem = items.find(item => item.name === name);
-         const updatedItems = items.filter(item => item.name !== name);
-         const targetKey = currentKey + '/' + name;
-         setSimulatedFilesystem(prev => {
-             const next = { ...prev, [currentKey]: updatedItems };
-             if (targetItem && targetItem.type === 'folder') {
-                 delete next[targetKey];
-                 Object.keys(next).forEach(key => {
-                     if (key.startsWith(targetKey + '/')) {
-                         delete next[key];
-                     }
-                 });
+      const handleDeleteItem = (name: string) => {
+          const currentKey = currentFolderKey;
+          const items = simulatedFilesystem[currentKey] || [];
+          const targetItem = items.find(item => item.name === name);
+          const updatedItems = items.filter(item => item.name !== name);
+          const targetKey = currentKey + '/' + name;
+
+          if (Capacitor.isNativePlatform()) {
+             try {
+                let directory = Directory.Documents;
+                if (activeProvider === 'SD card') {
+                   directory = Directory.External;
+                } else if (activeProvider === 'Cache') {
+                   directory = Directory.Cache;
+                }
+                const fullItemPath = currentPath.length > 0 ? `${currentPath.join('/')}/${name}` : name;
+                if (targetItem && targetItem.type === 'folder') {
+                   Filesystem.rmdir({
+                      path: fullItemPath,
+                      directory: directory,
+                      recursive: true
+                   });
+                } else {
+                   Filesystem.deleteFile({
+                      path: fullItemPath,
+                      directory: directory
+                   });
+                }
+             } catch (err) {
+                console.warn("Could not delete physically:", err);
              }
-             localStorage.setItem('grid_simulated_fs', JSON.stringify(next));
-             return next;
-         });
-         showToast(t(`U fshi skedari/dosja: ${name}`, `Deleted file/folder: ${name}`));
-     };
+          }
+
+          setSimulatedFilesystem(prev => {
+              const next = { ...prev, [currentKey]: updatedItems };
+              if (targetItem && targetItem.type === 'folder') {
+                  delete next[targetKey];
+                  Object.keys(next).forEach(key => {
+                      if (key.startsWith(targetKey + '/')) {
+                          delete next[key];
+                      }
+                  });
+              }
+              localStorage.setItem('grid_simulated_fs', JSON.stringify(next));
+              return next;
+          });
+          showToast(t(`U fshi skedari/dosja: ${name}`, `Deleted file/folder: ${name}`));
+      };
 
      return (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-2 sm:p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
@@ -6749,8 +6894,78 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                     </div>
                  </div>
 
-                 {/* Breadcrumbs & Search Area */}
-                 <div className="p-3 border-b border-zinc-500/10 flex flex-col gap-2 shrink-0 bg-zinc-500/5">
+                  {/* Breadcrumbs & Search Area */}
+                  <div className="p-3 border-b border-zinc-500/10 flex flex-col gap-2 shrink-0 bg-zinc-500/5">
+                     {/* Real Device File Importer Bar */}
+                     <div className="flex items-center justify-between gap-1.5 pb-1 border-b border-zinc-500/5">
+                        <span className="text-[9px] font-black text-green-500 uppercase tracking-widest flex items-center gap-1 select-none">
+                           <Smartphone className="w-3.5 h-3.5 animate-pulse" />
+                           <span>{t("Kujtesa e Telefonit (Reale)", "Phone Storage (Real)")}</span>
+                        </span>
+                        <label className="px-2.5 py-1 bg-green-500/10 hover:bg-green-500 text-green-500 hover:text-white rounded-lg text-[9px] font-black uppercase tracking-wide cursor-pointer transition-all flex items-center gap-1 active:scale-95 shadow-sm">
+                           <Upload className="w-3 h-3" />
+                           <span>{t("Zgjidh nga Pajisja", "Choose from Device")}</span>
+                           <input 
+                              type="file" 
+                              className="hidden" 
+                              accept=".txt,.json,.csv"
+                              onChange={async (e) => {
+                                 const file = e.target.files?.[0];
+                                 if (!file) return;
+                                 try {
+                                    const text = await file.text();
+                                    const sizeStr = file.size > 1024 * 1024 
+                                       ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` 
+                                       : `${(file.size / 1024).toFixed(1)} KB`;
+                                    
+                                    // Add to simulated filesystem
+                                    setSimulatedFilesystem(prev => {
+                                       const list = prev[currentFolderKey] || [];
+                                       const filtered = list.filter(item => item.name !== file.name);
+                                       const updated = [...filtered, {
+                                          name: file.name,
+                                          type: 'file',
+                                          size: sizeStr,
+                                          date: new Date().toLocaleString('sq-AL', { hour12: false }).split(',')[0],
+                                          content: text
+                                       }];
+                                       const next = {
+                                          ...prev,
+                                          [currentFolderKey]: updated
+                                       };
+                                       localStorage.setItem('grid_simulated_fs', JSON.stringify(next));
+                                       return next;
+                                    });
+
+                                    // Write physically if native Capacitor
+                                    if (Capacitor.isNativePlatform()) {
+                                       try {
+                                          let directory = Directory.Documents;
+                                          if (activeProvider === 'SD card') {
+                                             directory = Directory.External;
+                                          } else if (activeProvider === 'Cache') {
+                                             directory = Directory.Cache;
+                                          }
+                                          const fileFullPath = currentPath.length > 0 ? `${currentPath.join('/')}/${file.name}` : file.name;
+                                          const base64Data = btoa(unescape(encodeURIComponent(text)));
+                                          await Filesystem.writeFile({
+                                             path: fileFullPath,
+                                             data: base64Data,
+                                             directory: directory
+                                          });
+                                       } catch (physErr) {
+                                          console.error("Could not save physical copy:", physErr);
+                                       }
+                                    }
+
+                                    showToast(t(`U ngarkua me sukses skedari: '${file.name}'`, `Successfully loaded file: '${file.name}'`));
+                                 } catch (err) {
+                                    showToast(t("Dështoi ngarkimi i skedarit.", "Failed to load file."));
+                                 }
+                              }}
+                           />
+                        </label>
+                     </div>
                     {/* Path Breadcrumbs */}
                     <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-hide py-1 text-xs">
                        <button 
@@ -10176,44 +10391,44 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                         {customLabels.map((label, idx) => {
                            // Count how many documents belong to this label
                            const labelDocsCount = documents.filter(doc => doc.tags && doc.tags.includes(label)).length;
-                           const isLong = label.length > 12;
+                           const isLong = label.length > 7;
                            return (
                               <div
                                  key={label}
-                                 className={`p-2.5 sm:p-4 rounded-2xl border transition-all hover:-translate-y-1 cursor-pointer flex items-center justify-between h-[80px] sm:h-[84px] shadow-sm hover:shadow-lg ${
+                                 className={`p-2.5 sm:p-3.5 rounded-2xl border transition-all hover:-translate-y-1 cursor-pointer flex flex-col justify-between h-[80px] sm:h-[84px] shadow-sm hover:shadow-lg ${
                                     isDark 
                                        ? "bg-zinc-900 border-zinc-800 hover:border-orange-500/50 hover:bg-zinc-850" 
                                        : "bg-white border-zinc-200 hover:border-orange-500/50 hover:bg-orange-50/10"
                                  }`}
                                  onClick={() => setSelectedLabelFolder(label)}
                               >
-                                 <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
-                                    <div className="p-1.5 sm:p-2.5 bg-orange-500/10 text-orange-500 rounded-xl shrink-0 w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center shadow-inner">
-                                       <FolderOpen className="w-4 h-4 sm:w-5 h-5" />
-                                    </div>
-                                    <div className="flex flex-col min-w-0 flex-1">
-                                       <div className="flex items-center justify-between gap-1.5">
-                                          {isLong ? (
-                                             <div className="w-full overflow-hidden whitespace-nowrap relative">
-                                                <div className={`inline-block animate-marquee whitespace-nowrap font-extrabold text-xs sm:text-sm ${textColor} hover:[animation-play-state:paused]`}>
-                                                   <span className="pr-4">{label}</span>
-                                                   <span className="pr-4">{label}</span>
-                                                </div>
-                                             </div>
-                                          ) : (
-                                             <span className={`text-xs sm:text-sm font-extrabold block truncate ${textColor}`} title={label}>
-                                                {label}
-                                             </span>
-                                          )}
+                                 {/* Top Row: Full Name of Label (Scrolling text if long) */}
+                                 <div className="w-full overflow-hidden relative">
+                                    {isLong ? (
+                                       <div className="w-full overflow-hidden whitespace-nowrap relative">
+                                          <div className={`inline-block animate-marquee whitespace-nowrap font-extrabold text-xs sm:text-sm ${textColor} hover:[animation-play-state:paused]`}>
+                                             <span className="pr-4">{label}</span>
+                                             <span className="pr-4">{label}</span>
+                                          </div>
                                        </div>
-                                       <span className="text-[9px] text-zinc-500 font-semibold mt-0.5 truncate">
-                                          {labelDocsCount === 1 
-                                             ? t("1 Listë", "1 List") 
-                                             : t(`${labelDocsCount} Lista`, `${labelDocsCount} Lists`)}
+                                    ) : (
+                                       <span className={`text-xs sm:text-sm font-extrabold block truncate ${textColor}`} title={label}>
+                                          {label}
                                        </span>
-                                    </div>
+                                    )}
                                  </div>
-                                 <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0 hidden sm:block" />
+
+                                 {/* Bottom Row: Folder Icon and List Count (emri te larte ikones) */}
+                                 <div className="flex items-center gap-2">
+                                    <div className="p-1 bg-orange-500/10 text-orange-500 rounded-lg shrink-0 w-6 h-6 flex items-center justify-center shadow-inner">
+                                       <FolderOpen className="w-3.5 h-3.5" />
+                                    </div>
+                                    <span className="text-[9px] text-zinc-500 font-bold truncate">
+                                       {labelDocsCount === 1 
+                                          ? t("1 Listë", "1 List") 
+                                          : t(`${labelDocsCount} Lista`, `${labelDocsCount} Lists`)}
+                                    </span>
+                                 </div>
                               </div>
                            );
                         })}
