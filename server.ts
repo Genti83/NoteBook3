@@ -117,7 +117,7 @@ async function startServer() {
          return res.status(401).json({ success: false, error: 'Ju lutemi kyçuni me Email/Fjalëkalim ose me Google për të sinkronizuar të dhënat.' });
       }
 
-      const { documents, activeDocId, blueText, secretList, pin, gistToken, gistId } = req.body;
+      const { documents, activeDocId, blueText, secretList, pin, gistToken, gistId, customLabels } = req.body;
       const key = (verified.email || verified.uid).toLowerCase();
 
       const db = readCloudDb();
@@ -127,6 +127,7 @@ async function startServer() {
         activeDocId: activeDocId || null,
         blueText: blueText !== undefined ? blueText : db[key]?.blueText,
         secretList: secretList !== undefined ? secretList : db[key]?.secretList,
+        customLabels: customLabels !== undefined ? customLabels : db[key]?.customLabels,
         pin: pin !== undefined ? pin : db[key]?.pin,
         gistToken: gistToken !== undefined ? gistToken : db[key]?.gistToken,
         gistId: gistId !== undefined ? gistId : db[key]?.gistId,
@@ -177,6 +178,7 @@ async function startServer() {
         activeDocId: record.activeDocId,
         blueText: record.blueText,
         secretList: record.secretList,
+        customLabels: record.customLabels || [],
         pin: record.pin,
         gistToken: record.gistToken,
         gistId: record.gistId,
