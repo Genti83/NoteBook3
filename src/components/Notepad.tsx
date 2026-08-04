@@ -812,15 +812,15 @@ export function Notepad() {
   const [tempGistId, setTempGistId] = React.useState<string>('');
   const [onlineSearch, setOnlineSearch] = React.useState<string>('');
 
-  const addFileToSimulatedFilesystem = (fileName: string, fileSize: number) => {
+  const addFileToSimulatedFilesystem = (fileName: string, fileSize: number, fileContent?: string) => {
     setSimulatedFilesystem(prev => {
       const baseDir = localStorage.getItem('grid_android_base_dir') || androidBaseDir || 'M35 e GE';
       const folderStr = localStorage.getItem('grid_folder_name') !== null ? localStorage.getItem('grid_folder_name')! : folderName;
       const currentFolderKey = baseDir + (folderStr ? '/' + folderStr : '');
       const currentItems = prev[currentFolderKey] || [];
-      if (currentItems.some(item => item.name === fileName)) {
-        return prev;
-      }
+      
+      // Update existing or add new
+      const filtered = currentItems.filter(item => item.name !== fileName);
 
       const formatBytes = (bytes: number) => {
         if (!bytes) return '0 B';
@@ -834,11 +834,12 @@ export function Notepad() {
         name: fileName,
         size: formatBytes(fileSize),
         date: new Date().toLocaleDateString('sq-AL', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + new Date().toLocaleTimeString('sq-AL', { hour: '2-digit', minute: '2-digit' }),
-        type: 'file'
+        type: 'file',
+        content: fileContent || ''
       };
       return {
         ...prev,
-        [currentFolderKey]: [...currentItems, newItem]
+        [currentFolderKey]: [...filtered, newItem]
       };
     });
   };
@@ -2225,6 +2226,143 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       reader.readAsText(file);
    };
 
+   const handleLoadFileFromSimulatedStorage = async (item: any) => {
+      if (!item || !item.name) return;
+      try {
+         let content = item.content || '';
+         const name = item.name;
+         
+         // Generate mock content for initial pre-populated files if empty
+         if (!content) {
+            if (name.endsWith('.json')) {
+               content = JSON.stringify([{
+                  id: 'mock_doc_' + Date.now(),
+                  title: name.replace('.json', ''),
+                  rows: [
+                     { id: '1', col1: 'Task 1', col2: 'Zgjedhur nga memorja', col3: 'Në pritje' },
+                     { id: '2', col1: 'Task 2', col2: 'Lexuar nga dosja', col3: 'Përfunduar' }
+                  ],
+                  headers: ['Elementi', 'Përshkrimi', 'Statusi'],
+                  tags: [],
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString()
+               }], null, 2);
+            } else if (name.endsWith('.csv')) {
+               content = "Elementi,Përshkrimi,Statusi\nTask 1,Zgjedhur nga memorja,Në pritje\nTask 2,Lexuar nga dosja,Përfunduar";
+            } else {
+               content = `--- ${name.toUpperCase()} ---\nKy është një dokument i simuluar i ngarkuar nga memorja e telefonit.\nData: ${new Date().toLocaleString('sq-AL')}`;
+            }
+         }
+
+         // Import the content based on file extension
+         if (name.endsWith('.json')) {
+            const parsed = JSON.parse(content);
+            if (Array.isArray(parsed)) {
+               const mergedMap = new Map<string, any>();
+               documents.forEach(d => mergedMap.set(d.id, d));
+               parsed.forEach((d: any) => {
+                  if (d && d.id) {
+                     mergedMap.set(d.id, {
+                        id: d.id,
+                        title: d.title || 'Dokument i Importuar',
+                        rows: d.rows || [],
+                        headers: d.headers || ['Fusha 1', 'Fusha 2', 'Fusha 3'],
+                        tags: d.tags || [],
+                        createdAt: d.createdAt || new Date().toISOString(),
+                        updatedAt: d.updatedAt || new Date().toISOString()
+                     });
+                  }
+               });
+               const updated = Array.from(mergedMap.values());
+               setDocuments(updated);
+               localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(updated));
+               showToast(t(`U importuan me sukses ${parsed.length} dokumente nga '${name}'!`, `Successfully imported ${parsed.length} documents from '${name}'!`));
+               await syncWithGoogleCloud(updated, false);
+               setShowStoragePickerModal(false);
+            } else if (parsed.secretList && Array.isArray(parsed.secretList)) {
+               const importedList = parsed.secretList.map((x: any) => ({
+                  id: x.id || Date.now().toString() + Math.random().toString(),
+                  name: x.name || x.text || t('I importuar', 'Imported'),
+                  content: x.content !== undefined ? x.content : (x.note || ''),
+                  text: x.name || x.text || t('I importuar', 'Imported'),
+                  done: !!x.done,
+                  createdAt: x.createdAt || new Date().toISOString(),
+                  updatedAt: x.updatedAt || new Date().toISOString()
+               }));
+               setSecretList(importedList);
+               localStorage.setItem('grid_notepad_secret_list', JSON.stringify(importedList));
+               showToast(t(`U importuan me sukses sekretet nga '${name}'!`, `Successfully imported secrets from '${name}'!`));
+               setShowStoragePickerModal(false);
+            } else {
+               showToast(t("Skedar JSON i pavlefshëm për importim.", "Invalid JSON file for import."));
+            }
+         } else if (name.endsWith('.csv')) {
+            const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+            if (lines.length > 0) {
+               const rawHeaders = lines[0].split(',');
+               const headersToUse = [
+                  rawHeaders[0] || 'Kollona 1',
+                  rawHeaders[1] || 'Kollona 2',
+                  rawHeaders[2] || 'Kollona 3'
+               ];
+               const rowsToUse = lines.slice(1).map((line, idx) => {
+                  const parts = line.split(',');
+                  return {
+                     id: (idx + 1).toString(),
+                     col1: parts[0] || '',
+                     col2: parts[1] || '',
+                     col3: parts[2] || ''
+                  };
+               });
+               const newDoc = {
+                  id: 'csv_' + Date.now(),
+                  title: name.replace('.csv', ''),
+                  rows: rowsToUse,
+                  headers: headersToUse,
+                  tags: [],
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString()
+               };
+               const updated = [newDoc, ...documents];
+               setDocuments(updated);
+               localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(updated));
+               openDocument(newDoc);
+               showToast(t(`U krijua lista e re nga skedari CSV '${name}'!`, `Created new list from CSV file '${name}'!`));
+               await syncWithGoogleCloud(updated, false);
+               setShowStoragePickerModal(false);
+            } else {
+               showToast(t("Skedar CSV i zbrazët.", "Empty CSV file."));
+            }
+         } else {
+            const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+            const rowsToUse = lines.map((line, idx) => ({
+               id: (idx + 1).toString(),
+               col1: line,
+               col2: '',
+               col3: ''
+            }));
+            const newDoc = {
+               id: 'txt_' + Date.now(),
+               title: name.replace('.txt', ''),
+               rows: rowsToUse.length > 0 ? rowsToUse : [{ id: '1', col1: content, col2: '', col3: '' }],
+               headers: [t('Shënim', 'Note'), '', ''],
+               tags: [],
+               createdAt: new Date().toISOString(),
+               updatedAt: new Date().toISOString()
+            };
+            const updated = [newDoc, ...documents];
+            setDocuments(updated);
+            localStorage.setItem('grid_notepad_documents_v2', JSON.stringify(updated));
+            openDocument(newDoc);
+            showToast(t(`U krijua shënimi i ri nga skedari '${name}'!`, `Created new note from file '${name}'!`));
+            await syncWithGoogleCloud(updated, false);
+            setShowStoragePickerModal(false);
+         }
+      } catch (err) {
+         showToast(t("Gabim gjatë ngarkimit të skedarit: " + err, "Error loading file: " + err));
+      }
+   };
+
   const loadFromGoogleCloud = async (silent = false) => {
     setIsFetchingCloud(true);
     if (!user) {
@@ -3557,7 +3695,11 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
   const handleDownload = async (blob: Blob, filename: string, mimeType: string, shareTitle: string) => {
       // Shto skedarin në sistemin e simuluar të skedarëve që të shfaqet në "Zgjedhësin e Dosjeve"
-      addFileToSimulatedFilesystem(filename, blob.size);
+      let contentStr = "";
+      try {
+          contentStr = await blob.text();
+      } catch (err) {}
+      addFileToSimulatedFilesystem(filename, blob.size, contentStr);
       try {
           if (Capacitor.isNativePlatform()) {
               const reader = new FileReader();
@@ -6521,20 +6663,23 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
      const handleDeleteItem = (name: string) => {
          const currentKey = currentFolderKey;
          const items = simulatedFilesystem[currentKey] || [];
+         const targetItem = items.find(item => item.name === name);
          const updatedItems = items.filter(item => item.name !== name);
          const targetKey = currentKey + '/' + name;
          setSimulatedFilesystem(prev => {
              const next = { ...prev, [currentKey]: updatedItems };
-             delete next[targetKey];
-             Object.keys(next).forEach(key => {
-                 if (key.startsWith(targetKey + '/')) {
-                     delete next[key];
-                 }
-             });
+             if (targetItem && targetItem.type === 'folder') {
+                 delete next[targetKey];
+                 Object.keys(next).forEach(key => {
+                     if (key.startsWith(targetKey + '/')) {
+                         delete next[key];
+                     }
+                 });
+             }
              localStorage.setItem('grid_simulated_fs', JSON.stringify(next));
              return next;
          });
-         showToast(t(`U fshi folderi: ${name}`, `Deleted folder: ${name}`));
+         showToast(t(`U fshi skedari/dosja: ${name}`, `Deleted file/folder: ${name}`));
      };
 
      return (
@@ -6699,30 +6844,49 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                          {t("Përzgjedh", "Select")}
                                       </button>
                                    </div>
-                                ) : (
-                                   <div className="flex items-center gap-3 flex-1 min-w-0 text-left font-normal text-xs opacity-75">
-                                      <div className="w-8 h-8 rounded-lg bg-zinc-500/10 flex items-center justify-center text-green-500 shrink-0">
-                                         <FileText className="w-4 h-4" />
-                                      </div>
-                                      <div className="min-w-0 flex-1">
-                                         <span className="truncate block font-bold text-xs">{item.name}</span>
-                                         <span className="text-[9px] text-zinc-400 font-mono block mt-0.5">
-                                            {item.size || "0 B"} • {item.date || "Sot"}
-                                         </span>
-                                      </div>
-                                   </div>
-                                )}
+                                 ) : (
+                                    <div className="flex items-center justify-between gap-3 flex-1 min-w-0 text-left font-normal text-xs w-full">
+                                       <div className="flex items-center gap-3 min-w-0 flex-1 opacity-75">
+                                          <div className="w-8 h-8 rounded-lg bg-zinc-500/10 flex items-center justify-center text-green-500 shrink-0">
+                                             <FileText className="w-4 h-4" />
+                                          </div>
+                                          <div className="min-w-0 flex-1">
+                                             <span className="truncate block font-bold text-xs">{item.name}</span>
+                                             <span className="text-[9px] text-zinc-400 font-mono block mt-0.5">
+                                                {item.size || "0 B"} • {item.date || "Sot"}
+                                             </span>
+                                          </div>
+                                       </div>
+                                       <div className="flex items-center gap-1.5 shrink-0">
+                                          <button
+                                             type="button"
+                                             onClick={() => handleLoadFileFromSimulatedStorage(item)}
+                                             className="px-2.5 py-1 text-[10px] font-bold bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white rounded-lg transition-all font-sans"
+                                          >
+                                             {t("Ngarko", "Load")}
+                                          </button>
+                                          <button
+                                             type="button"
+                                             onClick={() => handleDeleteItem(item.name)}
+                                             className="p-1.5 hover:bg-red-500/10 text-zinc-400 hover:text-red-550 rounded-lg transition-colors"
+                                             title={t("Fshi Skedarin", "Delete File")}
+                                          >
+                                             <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                       </div>
+                                    </div>
+                                 )}
 
-                                {isFolder && (
-                                   <button
-                                      type="button"
-                                      onClick={() => handleDeleteItem(item.name)}
-                                      className="p-1.5 hover:bg-red-500/10 text-zinc-400 hover:text-red-550 rounded-lg transition-colors ml-1.5 shrink-0"
-                                      title="Fshi Dosjen"
-                                   >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                   </button>
-                                )}
+                                 {isFolder && (
+                                    <button
+                                       type="button"
+                                       onClick={() => handleDeleteItem(item.name)}
+                                       className="p-1.5 hover:bg-red-500/10 text-zinc-400 hover:text-red-550 rounded-lg transition-colors ml-1.5 shrink-0"
+                                       title="Fshi Dosjen"
+                                    >
+                                       <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                 )}
                              </div>
                           );
                        })
@@ -10016,72 +10180,40 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                            return (
                               <div
                                  key={label}
-                                 className={`p-3 sm:p-4 rounded-2xl border transition-all hover:-translate-y-1 cursor-pointer flex flex-col justify-between h-[115px] sm:h-[125px] shadow-sm hover:shadow-lg ${
+                                 className={`p-2.5 sm:p-4 rounded-2xl border transition-all hover:-translate-y-1 cursor-pointer flex items-center justify-between h-[80px] sm:h-[84px] shadow-sm hover:shadow-lg ${
                                     isDark 
                                        ? "bg-zinc-900 border-zinc-800 hover:border-orange-500/50 hover:bg-zinc-850" 
                                        : "bg-white border-zinc-200 hover:border-orange-500/50 hover:bg-orange-50/10"
                                  }`}
                                  onClick={() => setSelectedLabelFolder(label)}
                               >
-                                 <div className="flex flex-col min-w-0 w-full flex-1 justify-between">
-                                    <div className="flex items-start justify-between gap-1.5 min-w-0">
-                                       <div className="p-1 sm:p-1.5 bg-orange-500/10 text-orange-500 rounded-lg shrink-0 w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center shadow-inner">
-                                          <FolderOpen className="w-3.5 h-3.5" />
+                                 <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
+                                    <div className="p-1.5 sm:p-2.5 bg-orange-500/10 text-orange-500 rounded-xl shrink-0 w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center shadow-inner">
+                                       <FolderOpen className="w-4 h-4 sm:w-5 h-5" />
+                                    </div>
+                                    <div className="flex flex-col min-w-0 flex-1">
+                                       <div className="flex items-center justify-between gap-1.5">
+                                          {isLong ? (
+                                             <div className="w-full overflow-hidden whitespace-nowrap relative">
+                                                <div className={`inline-block animate-marquee whitespace-nowrap font-extrabold text-xs sm:text-sm ${textColor} hover:[animation-play-state:paused]`}>
+                                                   <span className="pr-4">{label}</span>
+                                                   <span className="pr-4">{label}</span>
+                                                </div>
+                                             </div>
+                                          ) : (
+                                             <span className={`text-xs sm:text-sm font-extrabold block truncate ${textColor}`} title={label}>
+                                                {label}
+                                             </span>
+                                          )}
                                        </div>
-                                       <span className="text-[9px] text-zinc-500 font-bold shrink-0 mt-0.5">
+                                       <span className="text-[9px] text-zinc-500 font-semibold mt-0.5 truncate">
                                           {labelDocsCount === 1 
                                              ? t("1 Listë", "1 List") 
                                              : t(`${labelDocsCount} Lista`, `${labelDocsCount} Lists`)}
                                        </span>
                                     </div>
-                                    
-                                    <div className="w-full overflow-hidden my-1 relative">
-                                       {isLong ? (
-                                          <div className="w-full overflow-hidden whitespace-nowrap relative">
-                                             <div className="inline-block animate-marquee whitespace-nowrap font-extrabold text-xs sm:text-sm text-orange-500 hover:[animation-play-state:paused]">
-                                                <span className="pr-4">{label}</span>
-                                                <span className="pr-4">{label}</span>
-                                             </div>
-                                          </div>
-                                       ) : (
-                                          <span className={`text-xs sm:text-sm font-extrabold block truncate ${textColor}`} title={label}>
-                                             {label}
-                                          </span>
-                                       )}
-                                    </div>
                                  </div>
-
-                                 <div className="flex items-center justify-between mt-1 pt-1.5 border-t border-zinc-500/10" onClick={(e) => e.stopPropagation()}>
-                                    <span className="text-[8px] sm:text-[9px] text-zinc-400 font-semibold uppercase tracking-wider">
-                                       {t("Veprimet", "Actions")}
-                                    </span>
-                                    <div className="flex items-center gap-1">
-                                       <button
-                                          type="button"
-                                          onClick={() => handleRenameCustomLabel(idx)}
-                                          className={`p-1 rounded-lg border transition-all hover:scale-110 active:scale-95 ${
-                                             isDark 
-                                                ? "border-zinc-800 text-zinc-400 hover:text-orange-500 hover:bg-zinc-800" 
-                                                : "border-zinc-200 text-zinc-500 hover:text-orange-600 hover:bg-orange-50/20"
-                                          }`}
-                                          title={t("Ndrysho emrin", "Rename label")}
-                                       >
-                                          <Edit className="w-3 h-3" />
-                                       </button>
-                                       <button
-                                          type="button"
-                                          onClick={() => handleDeleteCustomLabel(idx)}
-                                          className={`p-1 rounded-lg border transition-all hover:scale-110 active:scale-95 ${
-                                             isDark 
-                                                ? "border-zinc-800 text-zinc-400 hover:text-red-500 hover:bg-zinc-800" 
-                                                : "border-zinc-200 text-zinc-500 hover:text-red-600 hover:bg-red-50/20"
-                                          }`}
-                                          title={t("Fshi etiketën", "Delete label")}
-                                       >
-                                          <Trash2 className="w-3 h-3" />
-                                       </button>
-                                    </div>
-                                 </div>
+                                 <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0 hidden sm:block" />
                               </div>
                            );
                         })}
