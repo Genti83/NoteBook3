@@ -3855,6 +3855,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
           contentStr = await blob.text();
       } catch (err) {}
       addFileToSimulatedFilesystem(filename, blob.size, contentStr);
+      
       try {
           if (Capacitor.isNativePlatform()) {
               const reader = new FileReader();
@@ -3863,19 +3864,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                   const base64data = reader.result?.toString().split(',')[1];
                   if (base64data) {
                       try {
-                          // Request permission first to ensure we can write to memory
-                          try {
-                             await Filesystem.requestPermissions();
-                          } catch(permErr) {}
-
-                          // Get folder name from state/localStorage
-                          const manualFolder = localStorage.getItem('grid_mock_folder') || folderName;
-                          let sanitizedFolder = manualFolder ? manualFolder.replace(/[^a-zA-Z0-9_\s\/-]/g, '').trim() : '';
-                          sanitizedFolder = sanitizedFolder.replace(/^\/+|\/+$/g, '');
-                          const baseDirStr = localStorage.getItem('grid_android_base_dir') || 'documents';
-                          const fullPath = sanitizedFolder ? `${sanitizedFolder}/${filename}` : filename;
-                          
-                          // Write to a cache directory first so we can share it if needed
+                          // Ruaje skedarin në Cache përkohësisht për ta hapur me SAF
                           const writeResult = await Filesystem.writeFile({
                               path: filename,
                               data: base64data,
@@ -3883,190 +3872,53 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                               recursive: true
                           });
                           
-                          if (downloadMethod === 'share' || downloadMethod === 'picker') {
-                             await Share.share({
-                                 title: shareTitle,
-                                 url: writeResult.uri,
-                                 dialogTitle: 'Zgjidh ku do të ruash dokumentin (Save to...)'
-                             });
-                             showToast("Hapëm menunë për të zgjedhur dosjen!");
-                          } else {
-                             // Save to documents by default
-                             await Filesystem.writeFile({
-                                 path: fullPath,
-                                 data: base64data,
-                                 directory: getCapacitorDirectory(baseDirStr),
-                                 recursive: true
-                             });
-                             showToast(t(`Skedari u ruajt me sukses në ${baseDirStr}/${fullPath}`, `Saved to ${baseDirStr}/${fullPath}`));
-                          }
+                          showToast(t("Duke hapur Android System File Picker (SAF)... Zgjidhni 'Save to Files'", "Opening Android System File Picker (SAF)... Select 'Save to Files'"));
+                          
+                          // Hap dialogun e sistemit Android (SAF/DocumentsUI) përmes Share
+                          await Share.share({
+                              title: shareTitle || filename,
+                              url: writeResult.uri,
+                              dialogTitle: t('Ruaj Dokumentin (Android SAF)', 'Save Document (Android SAF)')
+                          });
                       } catch (e: any) {
-                          console.error("Capacitor save error:", e);
-                          showToast("Gabim gjatë ruajtjes: " + (e.message || "E panjohur"));
+                          console.error("Capacitor SAF save error:", e);
+                          // Fallback: Ruaj në direktorinë Documents të Capacitor
+                          try {
+                              const baseDirStr = 'documents';
+                              await Filesystem.writeFile({
+                                  path: filename,
+                                  data: base64data,
+                                  directory: getCapacitorDirectory(baseDirStr),
+                                  recursive: true
+                              });
+                              showToast(t(`Skedari u ruajt me sukses në Documents/${filename}`, `File saved successfully to Documents/${filename}`));
+                          } catch (fallbackErr: any) {
+                              showToast(t("Gabim gjatë ruajtjes së dokumentit!", "Error saving document!"));
+                          }
                       }
                   }
               };
               return;
           }
 
-          if (downloadMethod === 'folder') {
-              let rootHandle = await getDirectoryHandle();
-              
-              if (!rootHandle && typeof (window as any).showDirectoryPicker === 'function' && window.self === window.top) {
-                  try {
-                      rootHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
-                      setSaveDirectoryHandle(rootHandle);
-                  } catch(e) {
-                      console.error(e);
-                  }
-              }
-              
-              if (rootHandle) {
-                  try {
-                      const fileHandle = await rootHandle.getFileHandle(filename, { create: true });
-                      const writable = await fileHandle.createWritable();
-                      await writable.write(blob);
-                      await writable.close();
-                      showToast(`U ruajt drejtpërdrejt në dosjen: ${rootHandle.name}`);
-                      return;
-                  } catch (e: any) {
-                      console.error(e);
-                      showToast("Gabim gjatë ruajtjes në dosje. Riprovoni ose rregulloni lejet.");
-                  }
-              } else {
-                  let savedFolder = localStorage.getItem('grid_mock_folder') !== null ? localStorage.getItem('grid_mock_folder')! : folderName;
-                  const currentBase = localStorage.getItem('grid_android_base_dir') || androidBaseDir || 'documents';
-                  
-                  showToast(t(`U sinkronizua automatikisht drejt dosjes: '${currentBase}${savedFolder ? '/' + savedFolder : ''}'`, `Automatically synced to folder: '${currentBase}${savedFolder ? '/' + savedFolder : ''}'`));
-                  let sanitizedFolder = savedFolder ? savedFolder.replace(/[^a-zA-Z0-9_\s\/-]/g, '').trim() : '';
-                  sanitizedFolder = sanitizedFolder.replace(/^\/+|\/+$/g, '').replace(/\//g, '_');
-                  const finalFilename = sanitizedFolder ? `${sanitizedFolder}_${filename}` : filename;
-                  
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = finalFilename;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  URL.revokeObjectURL(url);
-                  return;
-              }
-          }
-          
-          if (downloadMethod === 'picker') {
-              if ('showSaveFilePicker' in window && window.self === window.top) {
-                  try {
-                      const handle = await (window as any).showSaveFilePicker({
-                          suggestedName: filename,
-                          types: [{ description: 'File', accept: { [mimeType]: [`.${filename.split('.').pop()}`] } }]
-                      });
-                      const writable = await handle.createWritable();
-                      await writable.write(blob);
-                      await writable.close();
-                      showToast(t("Skedari u ruajt me sukses në dosjen e zgjedhur!", "File saved successfully!"));
-                      return;
-                  } catch (err: any) {
-                      if (err.name === 'AbortError') return;
-                      showToast("Nuk mund të hapet File Manager direkt. Provoni opsionin 'Filemanager Internal/Folder'.");
-                      return;
-                  }
-              } else {
-                  showToast("Hapja direkte kërkon PC. Në celular përdorni opsionin 'Filemanager Internal/Folder'.");
-                  return;
-              }
-          }
-          
-          if (downloadMethod === 'auto') {
-               if ('showSaveFilePicker' in window && window.self === window.top && !/Mobi/i.test(navigator.userAgent)) {
-                   try {
-                       const handle = await (window as any).showSaveFilePicker({
-                           suggestedName: filename,
-                           types: [{ description: 'File', accept: { [mimeType]: [`.${filename.split('.').pop()}`] } }]
-                       });
-                       const writable = await handle.createWritable();
-                       await writable.write(blob);
-                       await writable.close();
-                       showToast(t("Skedari u ruajt me sukses në dosjen e zgjedhur!", "File saved successfully!"));
-                       return;
-                   } catch (err: any) {
-                        if (err.name === 'AbortError') return;
-                   }
-               }
-               try {
-                   const file = new File([blob], filename, { type: mimeType });
-                   if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                       await navigator.share({
-                           files: [file],
-                           title: shareTitle,
-                       });
-                       showToast(t("Zgjidhni 'Save to Files' në menunë e shfaqur.", "Select 'Save to Files' from the menu."));
-                       return;
-                   }
-               } catch (err: any) {
-                   if (err.name === 'AbortError') return;
-               }
-          }
-
-          if (downloadMethod === 'share') {
+          // Për Browser / PWA: Përdor Zgjedhësin Standard të Ruajtjes së Skedarëve nëse mbështetet
+          if ('showSaveFilePicker' in window && window.self === window.top) {
               try {
-                  if ('showSaveFilePicker' in window && window.self === window.top) {
-                      try {
-                          const handle = await (window as any).showSaveFilePicker({
-                              suggestedName: filename,
-                              types: [{ description: 'File', accept: { [mimeType]: [`.${filename.split('.').pop()}`] } }]
-                          });
-                          const writable = await handle.createWritable();
-                          await writable.write(blob);
-                          await writable.close();
-                          showToast("U ruajt në dosjen e zgjedhur!");
-                          return;
-                      } catch(ex: any) {
-                          if (ex.name === 'AbortError') return;
-                      }
-                  }
-
-                  const file = new File([blob], filename, { type: mimeType });
-                  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                      try {
-                          await navigator.share({
-                              files: [file],
-                              title: shareTitle,
-                          });
-                          showToast(t("Tani zgjidhni File Manager / 'Save to Files' në ekran.", "Now choose File Manager / 'Save to Files'."));
-                          return;
-                      } catch (e: any) {
-                          if (e.name === 'AbortError') return;
-                          console.error("Share error:", e);
-                          showToast(t("Dritarja e ndarjes nuk mbështetet këtu, po shkarkohet direkt.", "Share not supported here, downloading directly."));
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = filename;
-                          document.body.appendChild(a);
-                          a.click();
-                          document.body.removeChild(a);
-                          URL.revokeObjectURL(url);
-                          return;
-                      }
-                  } else {
-                      showToast("Ndarja nuk mbështetet. Po shkarkojmë direkt sekondar.");
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = filename;
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                      URL.revokeObjectURL(url);
-                      return;
-                  }
-              } catch (err: any) {
-                  if (err.name !== 'AbortError') showToast("Dështoi hapja e File Manager.");
+                  const handle = await (window as any).showSaveFilePicker({
+                      suggestedName: filename,
+                      types: [{ description: 'File', accept: { [mimeType]: [`.${filename.split('.').pop()}`] } }]
+                  });
+                  const writable = await handle.createWritable();
+                  await writable.write(blob);
+                  await writable.close();
+                  showToast(t("Skedari u ruajt me sukses!", "File saved successfully!"));
                   return;
+              } catch (err: any) {
+                  if (err.name === 'AbortError') return;
               }
           }
 
+          // Shkarkim standard si fallback në browser
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
@@ -4075,9 +3927,9 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
           a.click();
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
-          showToast(t("Skedari u ruajt direkt në 'Downloads'!", "File saved directly to 'Downloads'!"));
+          showToast(t("Skedari u shkarkua në pajisje!", "File downloaded to your device!"));
       } catch (err) {
-          showToast("Gabim gjatë shkarkimit!");
+          showToast(t("Gabim gjatë shkarkimit të skedarit!", "Error downloading file!"));
       }
   };
 
@@ -9818,184 +9670,29 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                        </button>
 
                        <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
-                       <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-green-500">{t('Menaxhimi Lokal (Ruajtja e Dokumenteve)', 'Local Management (Save Documents)')}</h4>
-                        <div className="px-4 py-2 flex flex-col gap-4">
-                            <div className="flex flex-col gap-3.5 p-4 rounded-xl border border-green-500/20 bg-green-500/5 dark:bg-green-500/10 w-full shadow-sm">
-                                <span className="leading-tight font-bold text-sm text-green-600 dark:text-green-500 flex items-center gap-1.5">
-                                    <Folder className="w-4 h-4 text-green-500" />
-                                    {t('Vendndodhja e Memories së Telefonit', 'Phone Storage Location')}
-                                </span>
-
-                                <div className={`p-3 rounded-lg border flex flex-col gap-1.5 ${isDark ? 'bg-zinc-950/60 border-zinc-800' : 'bg-zinc-50 border-zinc-200'}`}>
-                                    {/* Base directory selection */}
-                                    <div className="flex flex-col gap-1">
-                                        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                                            {t('Shtegu i Memorjes (Base Directory):', 'Storage Base Directory:')}
-                                        </label>
-                                        <select
-                                            value={androidBaseDir}
-                                            onChange={(e) => {
-                                                setAndroidBaseDir(e.target.value);
-                                                localStorage.setItem('grid_android_base_dir', e.target.value);
-                                                showToast(t(`U përzgjodh shtegu bazë: ${e.target.value}`, `Base directory selected: ${e.target.value}`));
-                                            }}
-                                            className={`p-1.5 rounded border text-xs font-semibold focus:outline-none ${
-                                                isDark ? 'bg-zinc-900 border-zinc-700 text-zinc-100' : 'bg-white border-zinc-300 text-zinc-800'
-                                            }`}
-                                        >
-                                            <option value="documents">Documents (Default)</option>
-                                            <option value="data">Data</option>
-                                            <option value="cache">Cache</option>
-                                        </select>
-                                    </div>
-
-                                    {/* Subfolder Direct Entry (Hyrje Direkt) */}
-                                    <div className="flex flex-col gap-1 mt-1.5">
-                                        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                                            {t('Emri i Dosjes (Subfolder - Hyrje Direkt):', 'Folder Name (Subfolder - Direct Entry):')}
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={folderName}
-                                            onChange={(e) => {
-                                                setFolderName(e.target.value);
-                                                localStorage.setItem('grid_folder_name', e.target.value);
-                                                localStorage.setItem('grid_mock_folder', e.target.value);
-                                            }}
-                                            placeholder="e.g. Documents"
-                                            className={`p-1.5 rounded border text-xs font-semibold focus:outline-none ${
-                                                isDark ? 'bg-zinc-900 border-zinc-700 text-zinc-100' : 'bg-white border-zinc-300 text-zinc-800'
-                                            }`}
-                                        />
-                                    </div>
-
-                                    <div className="flex flex-col gap-1 text-[10px] font-mono mt-2 text-green-600 dark:text-green-400 border-t border-zinc-500/10 pt-2">
-                                        <span className="opacity-75 uppercase tracking-wider font-bold text-[9px]">{t('Rruga e Plotë e Ruajtjes:', 'Full Storage Path:')}</span>
-                                        <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap scrollbar-hide py-0.5">
-                                             <span>📁</span>
-                                             <span className="font-bold underline">{androidBaseDir}</span>
-                                             <span>/</span>
-                                             {folderName ? (
-                                                 <>
-                                                     <span className="font-bold text-sky-500 dark:text-sky-400">{folderName}</span>
-                                                     <span>/</span>
-                                                 </>
-                                             ) : null}
-                                             <span className="opacity-60">[skedari].pdf / .txt</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Method Toggle */}
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                                        {t('Mënyra e Ruajtjes së Dokumentit:', 'Document Saving Method:')}
-                                    </label>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setDownloadMethod('share');
-                                                localStorage.setItem('grid_download_method', 'share');
-                                                showToast(t("Mënyra u vendos në 'Shpërndarje/Save to Files'!", "Saving method set to Share/Save to Files!"));
-                                            }}
-                                            className={`p-2.5 rounded-lg text-xs font-bold border transition-colors ${
-                                                downloadMethod === 'share'
-                                                    ? 'bg-green-500/20 text-green-500 border-green-500'
-                                                    : (isDark ? 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200' : 'bg-white border-zinc-200 text-zinc-500 hover:bg-zinc-50')
-                                            }`}
-                                        >
-                                            📢 {t('Shpërndaje (Share / Save to Files)', 'Share / Save to Files')}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setDownloadMethod('prompt');
-                                                localStorage.setItem('grid_download_method', 'prompt');
-                                                showToast(t("Mënyra u vendos në 'Shkarkim Standard'!", "Saving method set to Standard Download!"));
-                                            }}
-                                            className={`p-2.5 rounded-lg text-xs font-bold border transition-colors ${
-                                                downloadMethod === 'prompt'
-                                                    ? 'bg-green-500/20 text-green-500 border-green-500'
-                                                    : (isDark ? 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200' : 'bg-white border-zinc-200 text-zinc-500 hover:bg-zinc-50')
-                                            }`}
-                                        >
-                                            📥 {t('Shkarkim Standard (Browser)', 'Standard Download (Browser)')}
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {/* Native Folder Selector ("Allow / Select") */}
-                                <div className="flex flex-col gap-2.5 items-start w-full border-t border-zinc-500/10 pt-3">
-                                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
-                                         <FolderOpen className="w-3.5 h-3.5 text-sky-500 animate-pulse" />
-                                         {t('Zgjedhësi i Dosjeve Reale (Pick / Allow / Select):', 'Real Folder Selector (Pick / Allow / Select):')}
-                                    </span>
-                                    
-                                    <button 
-                                        type="button"
-                                        onClick={async () => {
-                                             try {
-                                                 if (typeof (window as any).showDirectoryPicker === "function" && window.self === window.top) {
-                                                     const handle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
-                                                     setSaveDirectoryHandle(handle);
-                                                     setFolderName(handle.name);
-                                                     localStorage.setItem("grid_mock_folder", handle.name);
-                                                     localStorage.setItem("grid_folder_name", handle.name);
-                                                     setDownloadMethod("folder");
-                                                     localStorage.setItem("grid_download_method", "folder");
-                                                     showToast(t(`Dosja "${handle.name}" u lidh dhe u lejua me sukses!`, `Folder "${handle.name}" linked & allowed successfully!`));
-                                                 } else {
-                                                     // Fallback: Open our beautifully designed Simulated Storage Picker Modal!
-                                                     setActiveProvider(localStorage.getItem('grid_android_base_dir') || 'documents');
-                                                     setCurrentPath(folderName && folderName !== 'Documents' ? folderName.split('/') : []);
-                                                     setShowStoragePickerModal(true);
-                                                     setShowOptionsMenu(false);
-                                                     showToast(t("U hap zgjedhësi i memories për telefonin tuaj!", "Opened storage folder picker for your phone!"));
-                                                 }
-                                             } catch (e: any) {
-                                                 if (e.name !== "AbortError") {
-                                                     setActiveProvider(localStorage.getItem('grid_android_base_dir') || 'documents');
-                                                     setCurrentPath(folderName && folderName !== 'Documents' ? folderName.split('/') : []);
-                                                     setShowStoragePickerModal(true);
-                                                     setShowOptionsMenu(false);
-                                                 }
-                                             }
-                                        }} 
-                                        className={`w-full py-2.5 px-4 text-xs font-bold rounded-xl transition-all border shadow-md active:scale-95 flex items-center justify-center gap-2 ${
-                                             isDark 
-                                                 ? 'bg-sky-600 hover:bg-sky-550 border-transparent text-white shadow-sky-950/20' 
-                                                 : 'bg-sky-500 hover:bg-sky-600 border-transparent text-white shadow-sky-500/10'
-                                        }`}
-                                    >
-                                         <FolderOpen className="w-4 h-4" />
-                                         <span>{t("HAP ZGJEDHËSIN E DOSJES (ALLOW & SELECT)", "OPEN FOLDER PICKER (ALLOW & SELECT)")}</span>
-                                    </button>
-
-                                    <input
-                                         type="file"
-                                         id="fallback-dir-picker"
-                                         className="hidden"
-                                         // @ts-ignore
-                                         webkitdirectory="true"
-                                         directory="true"
-                                         onChange={(e: any) => {
-                                             if (e.target.files && e.target.files.length > 0) {
-                                                 const path = e.target.files[0].webkitRelativePath || e.target.files[0].name;
-                                                 const folder = path ? path.split("/")[0] : "Dosja e Telefonit";
-                                                 setFolderName(folder);
-                                                 localStorage.setItem("grid_mock_folder", folder);
-                                                 localStorage.setItem("grid_folder_name", folder);
-                                                 setDownloadMethod("folder");
-                                                 localStorage.setItem("grid_download_method", "folder");
-                                                 showToast(t(`Dosja "${folder}" u zgjodh dhe u lejua!`, `Folder "${folder}" selected & allowed!`));
-                                             }
-                                         }}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                        <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
+                       <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-green-500">{t('Menaxhimi i Dokumenteve (Android SAF)', 'Document Saving (Android SAF)')}</h4>
+						<div className="px-4 py-2 flex flex-col gap-3">
+							<div className="p-4 rounded-xl border border-green-500/20 bg-green-500/5 dark:bg-green-500/10 w-full shadow-sm flex flex-col gap-2.5">
+								<span className="leading-tight font-bold text-sm text-green-600 dark:text-green-500 flex items-center gap-1.5">
+									<Folder className="w-4 h-4 text-green-500" />
+									{t('Android Storage Access Framework', 'Android Storage Access Framework')}
+								</span>
+								<p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+									{t(
+										'Dokumentet (PDF, TXT, CSV, JSON) ruhen përmes sistemit zyrtar Android SAF (System File Picker / DocumentsUI). Kjo ju lejon të zgjidhni lirisht çdo dosje, kartë SD ose memorie cloud direkte.',
+										'Documents (PDF, TXT, CSV, JSON) are saved via the official Android SAF system (System File Picker / DocumentsUI). This allows you to choose any folder, SD card, or cloud storage directly.'
+									)}
+								</p>
+								<div className="flex items-center gap-2 mt-1 text-[11px] font-semibold text-green-600 dark:text-green-400 bg-green-500/10 dark:bg-green-500/20 px-3 py-2 rounded-lg">
+									<span className="relative flex h-2 w-2">
+										<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+										<span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+									</span>
+									<span>{t('Sistemi SAF është plotësisht funksional!', 'SAF System is fully functional!')}</span>
+								</div>
+							</div>
+						</div>
+						<div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
                         <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-accent-500 flex items-center gap-1.5">
                            <Database className="w-4 h-4" /> {t('Backup i Sigurisë (Hapësira)', 'Security Backup')}
                         </h4>
