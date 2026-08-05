@@ -20,6 +20,7 @@ import { GoogleGenAI } from '@google/genai';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
+import { SaveAs } from 'capacitor-save-as';
 import { jsPDF } from 'jspdf';
 import { useFirebase } from '../hooks/useFirebase';
 
@@ -3864,36 +3865,52 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                   const base64data = reader.result?.toString().split(',')[1];
                   if (base64data) {
                       try {
-                          // Ruaje skedarin në Cache përkohësisht për ta hapur me SAF
-                          const writeResult = await Filesystem.writeFile({
-                              path: filename,
-                              data: base64data,
-                              directory: Directory.Cache,
-                              recursive: true
+                          showToast(t("Duke hapur Android System File Picker (SAF)...", "Opening Android System File Picker (SAF)..."));
+                          
+                          // Përdor plugin-in tonë të fuqishëm 'capacitor-save-as' për të hapur dialogun zyrtar SAF (DocumentsUI)
+                          await SaveAs.showSaveAsPicker({
+                              filename: filename,
+                              mimeType: mimeType,
+                              data: base64data
                           });
                           
-                          showToast(t("Duke hapur Android System File Picker (SAF)... Zgjidhni 'Save to Files'", "Opening Android System File Picker (SAF)... Select 'Save to Files'"));
-                          
-                          // Hap dialogun e sistemit Android (SAF/DocumentsUI) përmes Share
-                          await Share.share({
-                              title: shareTitle || filename,
-                              url: writeResult.uri,
-                              dialogTitle: t('Ruaj Dokumentin (Android SAF)', 'Save Document (Android SAF)')
-                          });
+                          showToast(t("Skedari u ruajt me sukses!", "File saved successfully!"));
                       } catch (e: any) {
                           console.error("Capacitor SAF save error:", e);
-                          // Fallback: Ruaj në direktorinë Documents të Capacitor
+                          
+                          // Nëse përdoruesi e anulloi (Cancelled), thjesht kthehu pa treguar gabim
+                          const msg = e && e.message ? e.message.toLowerCase() : "";
+                          if (msg.includes("cancel") || msg.includes("abort") || msg.includes("user canceled") || msg.includes("dialog canceled")) {
+                              return;
+                          }
+                          
+                          // Fallback: Ruaje skedarin në Cache përkohësisht për ta hapur me Share sheet ose standard Filesystem
                           try {
-                              const baseDirStr = 'documents';
-                              await Filesystem.writeFile({
+                              const writeResult = await Filesystem.writeFile({
                                   path: filename,
                                   data: base64data,
-                                  directory: getCapacitorDirectory(baseDirStr),
+                                  directory: Directory.Cache,
                                   recursive: true
                               });
-                              showToast(t(`Skedari u ruajt me sukses në Documents/${filename}`, `File saved successfully to Documents/${filename}`));
+                              
+                              await Share.share({
+                                  title: shareTitle || filename,
+                                  url: writeResult.uri,
+                                  dialogTitle: t('Ruaj Dokumentin (Android SAF Fallback)', 'Save Document (Android SAF Fallback)')
+                              });
                           } catch (fallbackErr: any) {
-                              showToast(t("Gabim gjatë ruajtjes së dokumentit!", "Error saving document!"));
+                              try {
+                                  const baseDirStr = 'documents';
+                                  await Filesystem.writeFile({
+                                      path: filename,
+                                      data: base64data,
+                                      directory: getCapacitorDirectory(baseDirStr),
+                                      recursive: true
+                                  });
+                                  showToast(t(`Skedari u ruajt në Documents/${filename}`, `File saved in Documents/${filename}`));
+                              } catch (finalErr: any) {
+                                  showToast(t("Gabim gjatë ruajtjes së dokumentit!", "Error saving document!"));
+                              }
                           }
                       }
                   }
@@ -9640,37 +9657,37 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                            </select>
                        </div>
 
-                       <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
-                       <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-green-500">{t('Menaxhimi Lokal (JSON)', 'Local Management')}</h4>
-                       <button onClick={handleExportDataJson} className={`flex items-center gap-3 px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-green-600 hover:text-white`}>
-                           <FileJson className="w-4 h-4 shrink-0" /> {t('Eksporto të gjitha si JSON', 'Export all as JSON')}
-                       </button>
-                       <label className={`flex items-center gap-3 px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-green-600 hover:text-white cursor-pointer`}>
-                           <UploadCloud className="w-4 h-4 shrink-0" /> {t('Importo nga JSON (Rikthe)', 'Import from JSON (Restore)')}
-                           <input type="file" accept=".json" className="hidden" onChange={handleImportDataJson} />
-                       </label>
-                       <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
+                        <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
+                        <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-green-500">{t('Menaxhimi Lokal (JSON)', 'Local Management')}</h4>
+                        <button onClick={handleExportDataJson} className={`flex items-center gap-3 px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-green-600 hover:text-white`}>
+                            <FileJson className="w-4 h-4 shrink-0" /> {t('Eksporto të gjitha si JSON', 'Export all as JSON')}
+                        </button>
+                        <label className={`flex items-center gap-3 px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-green-600 hover:text-white cursor-pointer`}>
+                            <UploadCloud className="w-4 h-4 shrink-0" /> {t('Importo nga JSON (Rikthe)', 'Import from JSON (Restore)')}
+                            <input type="file" accept=".json" className="hidden" onChange={handleImportDataJson} />
+                        </label>
 
-                       <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-orange-500">{t('Pamja & Tema', 'Appearance & Theme')}</h4>
-                       <button onClick={() => {
-                           const next = !themeSync;
-                           setThemeSync(next);
-                           localStorage.setItem('grid_theme_sync', next.toString());
-                           showToast(next ? t('Sinkronizimi me Sistemin u aktivizua', 'System Theme Sync enabled') : t('Sinkronizimi me Sistemin u çaktivizua', 'System Theme Sync disabled'));
-                       }} className={`flex items-center justify-between px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-orange-600 hover:text-white`}>
-                           <div className="flex items-center gap-3">
-                               <Monitor className="w-4 h-4 shrink-0" /> {t('Sinkronizo me Sistemin', 'Sync with System OS')}
-                           </div>
-                           <div className={`w-8 h-4 rounded-full transition-colors relative ${themeSync ? 'bg-green-500' : 'bg-zinc-500'}`}>
-                               <div className={`absolute top-0.5 bottom-0.5 w-3 bg-white rounded-full transition-all ${themeSync ? 'left-[18px]' : 'left-0.5'}`}></div>
-                           </div>
-                       </button>
-                       <button onClick={handleResetVisualSettings} className={`flex items-center gap-3 px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-orange-600 hover:text-white`}>
-                           <Paintbrush className="w-4 h-4 shrink-0" /> {t('Rivendos Pamjen Baza', 'Reset Base Appearance')}
-                       </button>
+                        <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
+                        <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-orange-500">{t('Pamja & Tema', 'Appearance & Theme')}</h4>
+                        <button onClick={() => {
+                            const next = !themeSync;
+                            setThemeSync(next);
+                            localStorage.setItem('grid_theme_sync', next.toString());
+                            showToast(next ? t('Sinkronizimi me Sistemin u aktivizua', 'System Theme Sync enabled') : t('Sinkronizimi me Sistemin u çaktivizua', 'System Theme Sync disabled'));
+                        }} className={`flex items-center justify-between px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-orange-600 hover:text-white`}>
+                            <div className="flex items-center gap-3">
+                                <Monitor className="w-4 h-4 shrink-0" /> {t('Sinkronizo me Sistemin', 'Sync with System OS')}
+                            </div>
+                            <div className={`w-8 h-4 rounded-full transition-colors relative ${themeSync ? 'bg-green-500' : 'bg-zinc-50'}`}>
+                                <div className={`absolute top-0.5 bottom-0.5 w-3 bg-white rounded-full transition-all ${themeSync ? 'left-[18px]' : 'left-0.5'}`}></div>
+                            </div>
+                        </button>
+                        <button onClick={handleResetVisualSettings} className={`flex items-center gap-3 px-4 py-3 text-sm text-left font-medium transition-colors hover:bg-orange-600 hover:text-white`}>
+                            <Paintbrush className="w-4 h-4 shrink-0" /> {t('Rivendos Pamjen Baza', 'Reset Base Appearance')}
+                        </button>
 
-                       <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
-                       <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-green-500">{t('Menaxhimi i Dokumenteve (Android SAF)', 'Document Saving (Android SAF)')}</h4>
+                        <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
+                        <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-green-500">{t('Menaxhimi i Dokumenteve (Android SAF)', 'Document Saving (Android SAF)')}</h4>
 						<div className="px-4 py-2 flex flex-col gap-3">
 							<div className="p-4 rounded-xl border border-green-500/20 bg-green-500/5 dark:bg-green-500/10 w-full shadow-sm flex flex-col gap-2.5">
 								<span className="leading-tight font-bold text-sm text-green-600 dark:text-green-500 flex items-center gap-1.5">
@@ -9690,9 +9707,38 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 									</span>
 									<span>{t('Sistemi SAF është plotësisht funksional!', 'SAF System is fully functional!')}</span>
 								</div>
+
+								<button
+									onClick={async () => {
+										if (Capacitor.isNativePlatform()) {
+											showToast(t(
+												"Në celular, sistemi SAF hapet automatikisht gjatë ruajtjes së skedarit për t'ju lejuar të zgjidhni çdo dosje!",
+												"On mobile, the SAF system opens automatically during file save to let you select any folder!"
+											));
+										} else {
+											if ('showDirectoryPicker' in window && window.self === window.top) {
+												try {
+													const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+													setSaveDirectoryHandle(handle);
+													showToast(t(`U zgjodh me sukses dosja: ${handle.name}`, `Successfully selected folder: ${handle.name}`));
+												} catch (err: any) {
+													if (err.name !== 'AbortError') {
+														showToast(t("Gabim gjatë zgjedhjes së dosjes!", "Error selecting folder!"));
+													}
+												}
+											} else {
+												showToast(t("Zgjedhësi i dosjeve kërkon një shfletues të përputhshëm (Chrome/Edge desktop).", "Folder picker requires a compatible browser (Chrome/Edge desktop)."));
+											}
+										}
+									}}
+									className="mt-2 w-full flex justify-center items-center gap-2 px-3 py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold text-xs rounded-lg shadow-sm transition-all active:scale-95 uppercase tracking-wide cursor-pointer"
+								>
+									<FolderOpen className="w-3.5 h-3.5" />
+									{t('HAP ZGJEDHËSIN E DOSJES (ALLOW & SELECT)', 'OPEN FOLDER PICKER (ALLOW & SELECT)')}
+								</button>
 							</div>
 						</div>
-						<div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
+<div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
                         <h4 className="px-4 py-2 font-bold mb-1 text-xs uppercase tracking-wider text-accent-500 flex items-center gap-1.5">
                            <Database className="w-4 h-4" /> {t('Backup i Sigurisë (Hapësira)', 'Security Backup')}
                         </h4>
