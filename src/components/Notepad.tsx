@@ -91,6 +91,61 @@ export interface GridDocument {
   userId?: string;
 }
 
+interface LabelScrollingTextProps {
+  label: string;
+  textColor: string;
+}
+
+const LabelScrollingText: React.FC<LabelScrollingTextProps> = ({ label, textColor }) => {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const textRef = React.useRef<HTMLSpanElement>(null);
+  const [isOverflowing, setIsOverflowing] = React.useState<boolean>(false);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    const text = textRef.current;
+    if (!container || !text) return;
+
+    const checkOverflow = () => {
+      const textWidth = text.getBoundingClientRect().width;
+      const containerWidth = container.getBoundingClientRect().width;
+      setIsOverflowing(textWidth > containerWidth);
+    };
+
+    checkOverflow();
+    const timer = setTimeout(checkOverflow, 150);
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => {
+        checkOverflow();
+      });
+      observer.observe(container);
+      return () => {
+        observer.disconnect();
+        clearTimeout(timer);
+      };
+    }
+    return () => clearTimeout(timer);
+  }, [label]);
+
+  return (
+    <div ref={containerRef} className="w-full overflow-hidden relative whitespace-nowrap">
+      {isOverflowing ? (
+        <div className="w-full overflow-hidden whitespace-nowrap relative">
+          <div className="inline-block animate-marquee-paused whitespace-nowrap font-extrabold text-xs sm:text-sm hover:[animation-play-state:paused]">
+            <span ref={textRef} className={`pr-6 ${textColor}`}>{label}</span>
+            <span className={`pr-6 ${textColor}`}>{label}</span>
+          </div>
+        </div>
+      ) : (
+        <span ref={textRef} className={`text-xs sm:text-sm font-extrabold block ${textColor}`} title={label}>
+          {label}
+        </span>
+      )}
+    </div>
+  );
+};
+
 
 const TEXT_COLORS = [
   { id: "default", name: "Default" },
@@ -369,6 +424,7 @@ export function Notepad() {
   const [currentPath, setCurrentPath] = React.useState<string[]>([]);
   const [showStoragePickerModal, setShowStoragePickerModal] = React.useState<boolean>(false);
   const [showStorageSidebar, setShowStorageSidebar] = React.useState<boolean>(false);
+  const [showFolderAllowModal, setShowFolderAllowModal] = React.useState<{ isOpen: boolean; provider: string; path: string; onConfirm: () => void } | null>(null);
   const [androidBaseDir, setAndroidBaseDir] = React.useState<string>(() => {
     const stored = localStorage.getItem('grid_android_base_dir');
     if (stored === 'Memoria e Telefonit' || !stored) {
@@ -6657,15 +6713,9 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
      // List of storage sources/providers for the "Open from" / "Hap nga" sidebar
      const sidebarProviders = [
-        { key: 'Downloads', label: t('Downloads', 'Downloads'), icon: Download, color: 'text-blue-500' },
         { key: 'M35 e GE', label: 'M35 e GE', icon: Smartphone, color: 'text-green-500 font-extrabold', badge: t('Brendshme', 'Internal') },
         { key: 'SD card', label: 'SD card', icon: HardDrive, color: 'text-amber-500' },
-        { key: 'Bug reports', label: t('Raporte gabimi', 'Bug reports'), icon: AlertTriangle, color: 'text-zinc-400' },
-        { key: 'Drive (appmguplayer@gmail.com)', label: 'Drive', sub: 'appmguplayer@gmail.com', icon: Cloud, color: 'text-sky-500' },
-        { key: 'Drive (dorina8819@gmail.com)', label: 'Drive', sub: 'dorina8819@gmail.com', icon: Cloud, color: 'text-sky-500' },
-        { key: 'Drive (genti8319@gmail.com)', label: 'Drive', sub: 'genti8319@gmail.com', icon: Cloud, color: 'text-emerald-500 font-bold', badge: 'Aktive' },
-        { key: 'Drive (gentiaxos@gmail.com)', label: 'Drive', sub: 'gentiaxos@gmail.com', icon: Cloud, color: 'text-sky-500' },
-        { key: 'Gallery', label: t('Galeria', 'Gallery'), icon: Palette, color: 'text-rose-500' }
+        { key: 'Drive (genti8319@gmail.com)', label: 'Drive', sub: 'genti8319@gmail.com', icon: Cloud, color: 'text-emerald-500 font-bold', badge: 'Aktive' }
      ];
 
      const renderSidebarContent = () => (
@@ -6722,15 +6772,22 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
      );
 
      const handleSelectCurrentFolder = () => {
-         const subPath = currentPath.join('/');
-         setAndroidBaseDir(activeProvider);
-         setFolderName(subPath);
-         localStorage.setItem('grid_android_base_dir', activeProvider);
-         localStorage.setItem('grid_mock_folder', subPath);
-         localStorage.setItem('grid_folder_name', subPath);
-         setShowStoragePickerModal(false);
-         showToast(t(`U zgjodh me sukses: ${activeProvider}${subPath ? '/' + subPath : ''}`, `Successfully selected: ${activeProvider}${subPath ? '/' + subPath : ''}`));
-     };
+          const subPath = currentPath.join('/');
+          setShowFolderAllowModal({
+             isOpen: true,
+             provider: activeProvider,
+             path: subPath,
+             onConfirm: () => {
+                setAndroidBaseDir(activeProvider);
+                setFolderName(subPath);
+                localStorage.setItem('grid_android_base_dir', activeProvider);
+                localStorage.setItem('grid_mock_folder', subPath);
+                localStorage.setItem('grid_folder_name', subPath);
+                setShowStoragePickerModal(false);
+                showToast(t(`U zgjodh me sukses: ${activeProvider}${subPath ? '/' + subPath : ''}`, `Successfully selected: ${activeProvider}${subPath ? '/' + subPath : ''}`));
+             }
+          });
+      };
 
      const handleCreateFolder = (name: string) => {
           const trimmed = name.trim();
@@ -7042,22 +7099,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                          <span className="truncate font-extrabold uppercase tracking-wide">{item.name}</span>
                                       </button>
                                       
-                                      <button
-                                         type="button"
-                                         onClick={() => {
-                                            const subPath = [...currentPath, item.name].join('/');
-                                            setAndroidBaseDir(activeProvider);
-                                            setFolderName(subPath);
-                                            localStorage.setItem("grid_android_base_dir", activeProvider);
-                                            localStorage.setItem("grid_mock_folder", subPath);
-                                            localStorage.setItem("grid_folder_name", subPath);
-                                            setShowStoragePickerModal(false);
-                                            showToast(t(`U zgjodh me sukses: ${activeProvider}/${subPath}`, `Successfully selected: ${activeProvider}/${subPath}`));
-                                         }}
-                                         className="px-2.5 py-1 text-[10px] font-bold bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white rounded-lg transition-all font-sans shrink-0"
-                                      >
-                                         {t("Përzgjedh", "Select")}
-                                      </button>
+                                      
                                    </div>
                                  ) : (
                                     <div className="flex items-center justify-between gap-3 flex-1 min-w-0 text-left font-normal text-xs w-full">
@@ -7080,28 +7122,12 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                           >
                                              {t("Ngarko", "Load")}
                                           </button>
-                                          <button
-                                             type="button"
-                                             onClick={() => handleDeleteItem(item.name)}
-                                             className="p-1.5 hover:bg-red-500/10 text-zinc-400 hover:text-red-550 rounded-lg transition-colors"
-                                             title={t("Fshi Skedarin", "Delete File")}
-                                          >
-                                             <Trash2 className="w-3.5 h-3.5" />
-                                          </button>
+                                          {/* Delete file hidden */}
                                        </div>
                                     </div>
                                  )}
 
-                                 {isFolder && (
-                                    <button
-                                       type="button"
-                                       onClick={() => handleDeleteItem(item.name)}
-                                       className="p-1.5 hover:bg-red-500/10 text-zinc-400 hover:text-red-550 rounded-lg transition-colors ml-1.5 shrink-0"
-                                       title="Fshi Dosjen"
-                                    >
-                                       <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                 )}
+                                 {/* Delete folder hidden */}
                              </div>
                           );
                        })
@@ -7109,31 +7135,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                  </div>
 
                  {/* Create New Folder Panel */}
-                 <div className="p-3 border-t border-zinc-500/10 shrink-0 bg-zinc-500/5 flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider select-none">
-                       {t("Krijo Dosje të Re në këtë nivel:", "Create New Folder at this level:")}
-                    </span>
-                    <div className="flex items-center gap-2">
-                       <input
-                          type="text"
-                          value={newFolderInputName}
-                          onChange={(e) => setNewFolderInputName(e.target.value)}
-                          onKeyDown={(e) => {
-                             if (e.key === 'Enter') handleCreateFolder(newFolderInputName);
-                          }}
-                          placeholder={t("Shkruaj emrin e folderit të ri...", "Enter name of new folder...")}
-                          className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-semibold outline-none border transition-all ${isDark ? "bg-zinc-950 border-zinc-800 text-white focus:border-green-500" : "bg-white border-zinc-300 text-zinc-900 focus:border-green-500 shadow-inner"}`}
-                       />
-                       <button
-                          type="button"
-                          onClick={() => handleCreateFolder(newFolderInputName)}
-                          className="px-3.5 py-1.5 bg-green-500 hover:bg-green-600 active:scale-95 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1 shrink-0 shadow-md"
-                       >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>{t("Krijo", "Create")}</span>
-                       </button>
-                    </div>
-                 </div>
+                 {/* Create folder disabled */}
 
                  {/* Actions Footer */}
                  <div className="p-3 sm:p-4 border-t border-zinc-500/10 shrink-0 flex flex-col sm:flex-row gap-3 items-center justify-between bg-zinc-500/5">
@@ -7169,10 +7171,64 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
      );
   };
 
-  const renderSharedModals = () => (
-    <>
-      {renderStoragePickerModal()}
-      {renderSecureLogoutModal()}
+     const renderFolderAllowModal = () => {
+      if (!showFolderAllowModal || !showFolderAllowModal.isOpen) return null;
+      return (
+         <div className="fixed inset-0 z-[320] flex items-start pt-12 pb-[40vh] md:items-center overflow-y-auto justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
+            <div className={`max-w-md w-full p-6 rounded-2xl shadow-2xl border flex flex-col ${isDark ? "bg-zinc-900 border-zinc-700 text-white" : "bg-white border-zinc-200 text-zinc-900"}`}>
+               <div className="flex justify-between items-center pb-3 border-b border-zinc-500/10 mb-4">
+                  <h4 className="text-xs sm:text-sm font-extrabold flex items-center gap-2 text-emerald-500 uppercase tracking-wider">
+                     <Smartphone className="w-5 h-5 animate-bounce text-green-500" /> {t("Sistemi i Ruajtjes: Kërkesë", "Storage System: Request")}
+                  </h4>
+                  <button onClick={() => setShowFolderAllowModal(null)} className="p-1 hover:text-red-550 transition-colors">
+                     <X className="w-4 h-4" />
+                  </button>
+               </div>
+               <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400 mb-5 whitespace-pre-line">
+                  {t(
+                    `Aplikacioni kërkon leje për të lexuar dhe shkruar dokumentet në këtë dosje:\n\n📍 rruga: `,
+                    `The application requires permission to read and write documents in this folder:\n\n📍 path: `
+                  )}
+                  <strong className="font-mono bg-zinc-500/10 px-1.5 py-0.5 rounded text-green-500 font-extrabold text-[11px] break-all">
+                     {showFolderAllowModal.provider}{showFolderAllowModal.path ? '/' + showFolderAllowModal.path : ''}
+                  </strong>
+                  {t(
+                    `\n\nDuke klikuar "Lejo (OK)", ju i jepni qasje të plotë këtij destinacioni për të ruajtur dokumentet tuaja nga pajisja.`,
+                    `\n\nBy clicking "Allow (OK)", you grant full access to this destination to save your documents from the device.`
+                  )}
+               </p>
+               <div className="flex gap-2.5 w-full">
+                  <button 
+                     type="button"
+                     onClick={() => setShowFolderAllowModal(null)} 
+                     className={`flex-1 py-2.5 rounded-lg font-bold text-xs border ${
+                        isDark ? "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-300" : "bg-white hover:bg-zinc-100 border-zinc-300 text-zinc-700"
+                     }`}
+                  >
+                     {t('Anulo', 'Cancel')}
+                  </button>
+                  <button 
+                     type="button"
+                     onClick={() => {
+                        const confirmFn = showFolderAllowModal.onConfirm;
+                        setShowFolderAllowModal(null);
+                        if (confirmFn) confirmFn();
+                     }} 
+                     className="flex-1 py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg transition-colors text-xs active:scale-95"
+                  >
+                     {t('Lejo (OK)', 'Allow (OK)')}
+                  </button>
+               </div>
+            </div>
+         </div>
+      );
+   };
+
+   const renderSharedModals = () => (
+     <>
+       {renderStoragePickerModal()}
+       {renderFolderAllowModal()}
+       {renderSecureLogoutModal()}
       {renderLogoutInfoModal()}
       {/* CONFIRMATION MODAL - DELETE DOC */}
       {docToDelete && (
@@ -10391,7 +10447,6 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                         {customLabels.map((label, idx) => {
                            // Count how many documents belong to this label
                            const labelDocsCount = documents.filter(doc => doc.tags && doc.tags.includes(label)).length;
-                           const isLong = label.length > 7;
                            return (
                               <div
                                  key={label}
@@ -10402,21 +10457,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                  }`}
                                  onClick={() => setSelectedLabelFolder(label)}
                               >
-                                 {/* Top Row: Full Name of Label (Scrolling text if long) */}
-                                 <div className="w-full overflow-hidden relative">
-                                    {isLong ? (
-                                       <div className="w-full overflow-hidden whitespace-nowrap relative">
-                                          <div className={`inline-block animate-marquee whitespace-nowrap font-extrabold text-xs sm:text-sm ${textColor} hover:[animation-play-state:paused]`}>
-                                             <span className="pr-4">{label}</span>
-                                             <span className="pr-4">{label}</span>
-                                          </div>
-                                       </div>
-                                    ) : (
-                                       <span className={`text-xs sm:text-sm font-extrabold block truncate ${textColor}`} title={label}>
-                                          {label}
-                                       </span>
-                                    )}
-                                 </div>
+                                 {/* Top Row: Full Name of Label (Scrolling text if overflows) */}
+                                 <LabelScrollingText label={label} textColor={textColor} />
 
                                  {/* Bottom Row: Folder Icon and List Count (emri te larte ikones) */}
                                  <div className="flex items-center gap-2">
