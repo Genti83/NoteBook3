@@ -68,3 +68,19 @@ try {
 } catch (err) {
     console.error('Error patching SaveAs.java:', err);
 }
+
+// Now patch build.gradle to compile SDK 36 and target SDK 36
+const gradlePath = path.join('node_modules', 'capacitor-save-as', 'android', 'build.gradle');
+try {
+    if (fs.existsSync(gradlePath)) {
+        let content = fs.readFileSync(gradlePath, 'utf8');
+        // Replace compileSdkVersion 35 with compileSdkVersion 36
+        content = content.replace(/compileSdkVersion\s+\d+/g, 'compileSdkVersion 36');
+        // Replace targetSdkVersion 35 with targetSdkVersion 36
+        content = content.replace(/targetSdkVersion\s+\d+/g, 'targetSdkVersion 36');
+        fs.writeFileSync(gradlePath, content, 'utf8');
+        console.log('Successfully patched build.gradle to SDK 36!');
+    }
+} catch (err) {
+    console.error('Error patching build.gradle:', err);
+}
