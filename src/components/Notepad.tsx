@@ -9946,11 +9946,19 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                                      localStorage.setItem("grid_download_method", "folder");
                                                      showToast(t(`Dosja "${handle.name}" u lidh dhe u lejua me sukses!`, `Folder "${handle.name}" linked & allowed successfully!`));
                                                  } else {
-                                                     document.getElementById("fallback-dir-picker")?.click();
+                                                     // Fallback: Open our beautifully designed Simulated Storage Picker Modal!
+                                                     setActiveProvider(localStorage.getItem('grid_android_base_dir') || 'documents');
+                                                     setCurrentPath(folderName && folderName !== 'Documents' ? folderName.split('/') : []);
+                                                     setShowStoragePickerModal(true);
+                                                     setShowOptionsMenu(false);
+                                                     showToast(t("U hap zgjedhësi i memories për telefonin tuaj!", "Opened storage folder picker for your phone!"));
                                                  }
                                              } catch (e: any) {
                                                  if (e.name !== "AbortError") {
-                                                     document.getElementById("fallback-dir-picker")?.click();
+                                                     setActiveProvider(localStorage.getItem('grid_android_base_dir') || 'documents');
+                                                     setCurrentPath(folderName && folderName !== 'Documents' ? folderName.split('/') : []);
+                                                     setShowStoragePickerModal(true);
+                                                     setShowOptionsMenu(false);
                                                  }
                                              }
                                         }} 
