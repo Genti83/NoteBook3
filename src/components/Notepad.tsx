@@ -3915,7 +3915,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
               if (!rootHandle && typeof (window as any).showDirectoryPicker === 'function' && window.self === window.top) {
                   try {
                       rootHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
-                      await saveDirectoryHandle(rootHandle);
+                      setSaveDirectoryHandle(rootHandle);
                   } catch(e) {
                       console.error(e);
                   }
@@ -6702,7 +6702,377 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
      );
   };
 
-  const renderStoragePickerModal = () => null;
+  const renderStoragePickerModal = () => {
+    if (!showStoragePickerModal) return null;
+
+    const getFolderKey = () => {
+      let base = activeProvider;
+      if (base === 'M35 e GE') base = 'documents';
+      if (currentPath.length === 0) return base;
+      return base + '/' + currentPath.join('/');
+    };
+
+    const currentFolderKey = getFolderKey();
+    const folderContents = simulatedFilesystem[currentFolderKey] || [];
+    
+    // Search filter
+    const filteredContents = folderContents.filter(item => 
+      item && item.name && item.name.toLowerCase().includes(storageSearchQuery.toLowerCase())
+    );
+
+    // Grouping: folders first, then files
+    const sortedContents = [...filteredContents].sort((a, b) => {
+      if (a.type === 'folder' && b.type !== 'folder') return -1;
+      if (a.type !== 'folder' && b.type === 'folder') return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    const handleCreateFolder = (name: string) => {
+      if (!name.trim()) return;
+      const cleanName = name.trim();
+      setSimulatedFilesystem(prev => {
+        const list = prev[currentFolderKey] || [];
+        if (list.some(x => x.name.toLowerCase() === cleanName.toLowerCase())) {
+          showToast(t("Kjo dosje ekziston tashmë!", "This folder already exists!"));
+          return prev;
+        }
+        const updated = [...list, { name: cleanName, type: 'folder' }];
+        const newFolderKey = currentFolderKey + '/' + cleanName;
+        return {
+          ...prev,
+          [currentFolderKey]: updated,
+          [newFolderKey]: []
+        };
+      });
+      setNewFolderInputName('');
+      showToast(t(`Dosja "${cleanName}" u krijua me sukses!`, `Folder "${cleanName}" created successfully!`));
+    };
+
+    const handleDeleteItem = (itemName: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!window.confirm(t(`Jeni të sigurt që dëshironi të fshini "${itemName}"?`, `Are you sure you want to delete "${itemName}"?`))) return;
+      
+      setSimulatedFilesystem(prev => {
+        const list = prev[currentFolderKey] || [];
+        const updatedList = list.filter(x => x.name !== itemName);
+        
+        // Also remove subdirectory keys if it's a folder
+        const newFS = { ...prev, [currentFolderKey]: updatedList };
+        const targetPrefix = currentFolderKey + '/' + itemName;
+        Object.keys(newFS).forEach(key => {
+          if (key === targetPrefix || key.startsWith(targetPrefix + '/')) {
+            delete newFS[key];
+          }
+        });
+        return newFS;
+      });
+      showToast(t(`"${itemName}" u fshi me sukses!`, `"${itemName}" deleted successfully!`));
+    };
+
+    const handleSelectCurrentFolder = () => {
+      const fullPath = currentPath.join('/');
+      setFolderName(fullPath);
+      localStorage.setItem('grid_folder_name', fullPath);
+      localStorage.setItem('grid_mock_folder', fullPath);
+      setDownloadMethod('folder');
+      localStorage.setItem('grid_download_method', 'folder');
+      
+      // Also update base directory in localStorage
+      localStorage.setItem('grid_android_base_dir', activeProvider);
+      setAndroidBaseDir(activeProvider);
+      
+      showToast(t(
+        `Dosja u përzgjodh: ${activeProvider === 'documents' ? 'Documents' : activeProvider}/${fullPath || 'Baza'}`, 
+        `Folder selected: ${activeProvider === 'documents' ? 'Documents' : activeProvider}/${fullPath || 'Root'}`
+      ));
+      setShowStoragePickerModal(false);
+    };
+
+    const providers = [
+      { id: 'documents', label: t('Memoria Bazë (Documents)', 'Internal Storage'), icon: Smartphone },
+      { id: 'SD card', label: t('Karta SD (Memory Card)', 'SD Card'), icon: HardDrive },
+      { id: 'Downloads', label: t('Shkarkimet (Downloads)', 'Downloads Folder'), icon: FolderDown },
+      { id: 'Drive (genti8319@gmail.com)', label: t('Google Drive (genti)', 'Google Drive (genti)'), icon: Cloud },
+      { id: 'Drive (dorina8819@gmail.com)', label: t('Google Drive (dorina)', 'Google Drive (dorina)'), icon: Cloud }
+    ];
+
+    return (
+      <div className="fixed inset-0 z-[250] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+        <div className={`max-w-3xl w-full h-[85vh] flex flex-col rounded-2xl shadow-2xl border overflow-hidden ${
+          isDark ? "bg-zinc-955 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-800"
+        }`}>
+          {/* Header */}
+          <div className={`px-5 py-4 border-b flex items-center justify-between shrink-0 ${
+            isDark ? "border-zinc-800 bg-zinc-900/50" : "border-zinc-100 bg-zinc-50/50"
+          }`}>
+            <div className="flex items-center gap-2.5">
+              <FolderOpen className="w-5 h-5 text-emerald-500 animate-pulse" />
+              <div>
+                <h3 className="font-bold text-sm uppercase tracking-wide">
+                  {t('Zgjedhësi dhe Menaxhuesi i Dosjeve', 'File & Folder Picker')}
+                </h3>
+                <p className="text-[10px] text-zinc-400">
+                  {t('Menaxhoni dhe përzgjidhni dosjet e memories për ruajtjen e dokumenteve', 'Manage and select storage folders for document saving')}
+                </p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setShowStoragePickerModal(false)}
+              className={`p-1.5 rounded-lg transition-colors ${
+                isDark ? "hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100" : "hover:bg-zinc-100 text-zinc-500 hover:text-zinc-900"
+              }`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Search bar inside header */}
+          <div className={`px-5 py-3 border-b flex flex-col sm:flex-row gap-3 items-center shrink-0 ${
+            isDark ? "border-zinc-800 bg-zinc-900/30" : "border-zinc-100 bg-zinc-50/30"
+          }`}>
+            <div className="relative w-full">
+              <Search className="absolute left-3 top-2.5 w-4 h-4 text-zinc-400" />
+              <input
+                type="text"
+                placeholder={t('Kërko skedarë ose dosje...', 'Search files or folders...')}
+                value={storageSearchQuery}
+                onChange={(e) => setStorageSearchQuery(e.target.value)}
+                className={`w-full pl-9 pr-4 py-2 rounded-lg border text-xs focus:outline-none transition-all ${
+                  isDark 
+                    ? "bg-zinc-900 border-zinc-800 text-zinc-100 focus:border-zinc-700" 
+                    : "bg-white border-zinc-200 text-zinc-800 focus:border-zinc-300"
+                }`}
+              />
+              {storageSearchQuery && (
+                <button 
+                  onClick={() => setStorageSearchQuery('')}
+                  className="absolute right-3 top-2.5 text-zinc-400 hover:text-zinc-100 text-xs"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            
+            {/* Direct select current path button */}
+            <button
+              onClick={handleSelectCurrentFolder}
+              className="w-full sm:w-auto shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition-colors shadow-md shadow-emerald-950/20 active:scale-95"
+            >
+              <Check className="w-4 h-4" />
+              {t('ZGJIDH KËTË DOSJE', 'SELECT THIS FOLDER')}
+            </button>
+          </div>
+
+          {/* Main content body with Sidebar and File area */}
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+            {/* Left Sidebar - Providers list */}
+            <div className={`w-60 border-r flex flex-col gap-1.5 p-3 overflow-y-auto shrink-0 ${
+              isDark ? "border-zinc-800 bg-zinc-900/20" : "border-zinc-100 bg-zinc-50/20"
+            }`}>
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-2 mb-1">
+                {t('Lokacionet e Memories', 'Storage Memories')}
+              </span>
+              {providers.map(prov => {
+                const Icon = prov.icon;
+                const isSelected = activeProvider === prov.id;
+                return (
+                  <button
+                    key={prov.id}
+                    onClick={() => {
+                      setActiveProvider(prov.id);
+                      setCurrentPath([]);
+                      setStorageSearchQuery('');
+                    }}
+                    className={`w-full px-3 py-2.5 rounded-lg text-left text-xs font-bold transition-all flex items-center gap-2.5 ${
+                      isSelected 
+                        ? (isDark ? "bg-emerald-600/20 text-emerald-400 border border-emerald-500/30" : "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20") 
+                        : (isDark ? "hover:bg-zinc-800 border border-transparent text-zinc-400 hover:text-zinc-200" : "hover:bg-zinc-100 border border-transparent text-zinc-600 hover:text-zinc-950")
+                    }`}
+                  >
+                    <Icon className={`w-4 h-4 shrink-0 ${isSelected ? "text-emerald-500" : "text-zinc-400"}`} />
+                    <span className="truncate">{prov.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Right File explorer area */}
+            <div className="flex-1 flex flex-col min-w-0 bg-transparent">
+              {/* Breadcrumbs bar */}
+              <div className={`px-4 py-2 border-b flex items-center gap-1.5 text-xs overflow-x-auto whitespace-nowrap scrollbar-hide shrink-0 ${
+                isDark ? "border-zinc-800 bg-zinc-900/10" : "border-zinc-100 bg-zinc-50/10"
+              }`}>
+                <button
+                  onClick={() => setCurrentPath([])}
+                  className={`font-semibold hover:underline flex items-center gap-1 ${
+                    currentPath.length === 0 ? "text-emerald-500" : "text-zinc-400"
+                  }`}
+                >
+                  📁 {activeProvider === 'documents' ? 'Documents' : activeProvider}
+                </button>
+                {currentPath.map((folder, idx) => {
+                  const targetSub = currentPath.slice(0, idx + 1);
+                  const isLast = idx === currentPath.length - 1;
+                  return (
+                    <React.Fragment key={idx}>
+                      <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                      <button
+                        onClick={() => setCurrentPath(targetSub)}
+                        className={`font-semibold hover:underline ${
+                          isLast ? "text-emerald-500" : "text-zinc-400"
+                        }`}
+                      >
+                        {folder}
+                      </button>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+
+              {/* Items grid / list */}
+              <div className="flex-1 overflow-y-auto p-4">
+                {sortedContents.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center p-8 text-center text-zinc-400">
+                    <FolderOpen className="w-12 h-12 text-zinc-300 dark:text-zinc-700 mb-3 animate-bounce" />
+                    <h4 className="font-bold text-sm text-zinc-300 dark:text-zinc-600">
+                      {t('Kjo dosje është bosh', 'This folder is empty')}
+                    </h4>
+                    <p className="text-xs text-zinc-500 max-w-sm mt-1">
+                      {t('Nuk ka asnjë skedar ose dosje këtu. Klikoni më poshtë për të krijuar një dosje të re ose shtuar shënime.', 'No files or folders here. Click below to create a new folder or add notes.')}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {/* Go up button if in subfolder */}
+                    {currentPath.length > 0 && (
+                      <div
+                        onClick={() => setCurrentPath(currentPath.slice(0, -1))}
+                        className={`p-3 rounded-xl border flex items-center gap-2.5 cursor-pointer transition-all active:scale-98 ${
+                          isDark 
+                            ? "bg-zinc-90 border-zinc-800 hover:bg-zinc-800" 
+                            : "bg-zinc-50 hover:bg-zinc-100 border-zinc-200"
+                        }`}
+                      >
+                        <ArrowLeft className="w-4 h-4 text-emerald-500" />
+                        <span className="text-xs font-bold text-emerald-500">
+                          ... ({t('Kthehu mbrapa', 'Go up')})
+                        </span>
+                      </div>
+                    )}
+
+                    {sortedContents.map((item, idx) => {
+                      const isFolder = item.type === 'folder';
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() => {
+                            if (isFolder) {
+                              setCurrentPath([...currentPath, item.name]);
+                            } else {
+                              if (window.confirm(t(`Dëshironi të ngarkoni/importoni skedarin "${item.name}"?`, `Do you want to load/import file "${item.name}"?`))) {
+                                handleLoadFileFromSimulatedStorage(item);
+                              }
+                            }
+                          }}
+                          className={`p-3 rounded-xl border flex items-center justify-between group cursor-pointer transition-all active:scale-98 ${
+                            isDark 
+                              ? "bg-zinc-900 hover:bg-zinc-800/80 border-zinc-800 hover:border-zinc-700" 
+                              : "bg-white hover:bg-zinc-50/80 border-zinc-200 hover:border-zinc-300"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            {isFolder ? (
+                              <Folder className="w-5 h-5 text-yellow-500 shrink-0" />
+                            ) : (
+                              <FileText className="w-5 h-5 text-sky-500 shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold truncate pr-1">
+                                {item.name}
+                              </p>
+                              <p className="text-[10px] text-zinc-400">
+                                {item.size ? `${item.size} • ` : ''}{item.date || t('Sot', 'Today')}
+                              </p>
+                            </div>
+                          </div>
+                          
+                          <button
+                            onClick={(e) => handleDeleteItem(item.name, e)}
+                            className={`p-1.5 rounded-lg text-zinc-400 hover:text-red-500 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Action bar to create folder inside explorer */}
+              <div className={`p-4 border-t flex flex-col sm:flex-row gap-2.5 shrink-0 ${
+                isDark ? "border-zinc-800 bg-zinc-900/30" : "border-zinc-100 bg-zinc-50/30"
+              }`}>
+                <div className="flex-1 flex gap-2">
+                  <input
+                    type="text"
+                    placeholder={t('Emri i dosjes së re...', 'New folder name...')}
+                    value={newFolderInputName}
+                    onChange={(e) => setNewFolderInputName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCreateFolder(newFolderInputName);
+                    }}
+                    className={`flex-1 px-3 py-2 rounded-lg border text-xs focus:outline-none transition-all ${
+                      isDark 
+                        ? "bg-zinc-900 border-zinc-800 text-zinc-100 focus:border-zinc-700" 
+                        : "bg-white border-zinc-200 text-zinc-800 focus:border-zinc-300"
+                    }`}
+                  />
+                  <button
+                    onClick={() => handleCreateFolder(newFolderInputName)}
+                    className="bg-zinc-500 hover:bg-zinc-600 text-white font-bold p-2 rounded-lg text-xs flex items-center justify-center transition-colors active:scale-95"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+                
+                {/* Simulated file creation helper to backup lists */}
+                <button
+                  onClick={() => {
+                    const backupName = `backup_bllok_${Date.now().toString().slice(-4)}.json`;
+                    setSimulatedFilesystem(prev => {
+                      const list = prev[currentFolderKey] || [];
+                      const backupContent = JSON.stringify(documents, null, 2);
+                      const updated = [...list, {
+                        name: backupName,
+                        type: 'file',
+                        size: `${(backupContent.length / 1024).toFixed(1)} KB`,
+                        date: new Date().toLocaleString('sq-AL'),
+                        content: backupContent
+                      }];
+                      return {
+                        ...prev,
+                        [currentFolderKey]: updated
+                      };
+                    });
+                    showToast(t(`Skedari i backupit "${backupName}" u krijua me sukses!`, `Backup file "${backupName}" created successfully!`));
+                  }}
+                  className={`px-3 py-2 rounded-lg border font-bold text-xs flex items-center justify-center gap-1.5 transition-colors active:scale-95 ${
+                    isDark 
+                      ? "bg-zinc-900 hover:bg-zinc-850 border-zinc-800 text-zinc-300 hover:text-white" 
+                      : "bg-zinc-50 hover:bg-zinc-100 border-zinc-200 text-zinc-600 hover:text-zinc-900"
+                  }`}
+                >
+                  <Save className="w-3.5 h-3.5 text-sky-500" />
+                  {t('SHTO BACKUP JSON', 'ADD JSON BACKUP')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
 
      const renderFolderAllowModal = () => null;
@@ -9568,7 +9938,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                              try {
                                                  if (typeof (window as any).showDirectoryPicker === "function" && window.self === window.top) {
                                                      const handle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
-                                                     await saveDirectoryHandle(handle);
+                                                     setSaveDirectoryHandle(handle);
                                                      setFolderName(handle.name);
                                                      localStorage.setItem("grid_mock_folder", handle.name);
                                                      localStorage.setItem("grid_folder_name", handle.name);
