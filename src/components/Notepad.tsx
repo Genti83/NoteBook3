@@ -442,6 +442,8 @@ export function Notepad() {
   });
   const [downloadMethod, setDownloadMethod] = React.useState<string>(() => localStorage.getItem('grid_download_method') || 'share');
   const [saveDirectoryHandle, setSaveDirectoryHandle] = React.useState<any>(null);
+  const [nativeSaveDirectoryUri, setNativeSaveDirectoryUri] = React.useState<string | null>(() => localStorage.getItem('native_save_directory_uri'));
+
 
   const [backupModal, setBackupModal] = React.useState<boolean>(false);
   const [mainTab, setMainTab] = React.useState<'lista' | 'etiketa'>('lista');
@@ -992,6 +994,24 @@ export function Notepad() {
       return null;
     }
   };
+
+  React.useEffect(() => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        (SaveAs as any).getSelectedDirectory().then((res: any) => {
+          if (res && res.uri) {
+            setNativeSaveDirectoryUri(res.uri);
+            localStorage.setItem('native_save_directory_uri', res.uri);
+          }
+        }).catch((e: any) => {
+          console.error("Error getting native selected directory:", e);
+        });
+      } catch (e) {
+        console.error("SaveAs getSelectedDirectory error:", e);
+      }
+    }
+  }, []);
+
 
 
 
@@ -3865,16 +3885,27 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                   const base64data = reader.result?.toString().split(',')[1];
                   if (base64data) {
                       try {
-                          showToast(t("Duke hapur Android System File Picker (SAF)...", "Opening Android System File Picker (SAF)..."));
-                          
-                          // Përdor plugin-in tonë të fuqishëm 'capacitor-save-as' për të hapur dialogun zyrtar SAF (DocumentsUI)
-                          await SaveAs.showSaveAsPicker({
-                              filename: filename,
-                              mimeType: mimeType,
-                              data: base64data
-                          });
-                          
-                          showToast(t("Skedari u ruajt me sukses!", "File saved successfully!"));
+                          if (nativeSaveDirectoryUri) {
+                              showToast(t("Duke ruajtur automatikisht në dosjen e zgjedhur...", "Automatically saving to selected folder..."));
+                              await (SaveAs as any).saveFileToDirectory({
+                                  filename: filename,
+                                  mimeType: mimeType,
+                                  data: base64data,
+                                  directoryUri: nativeSaveDirectoryUri
+                              });
+                              showToast(t(`Skedari "${filename}" u ruajt me sukses në dosjen tuaj!`, `File "${filename}" saved successfully in your folder!`));
+                          } else {
+                              showToast(t("Duke hapur Android System File Picker (SAF)...", "Opening Android System File Picker (SAF)..."));
+                              
+                              // Përdor plugin-in tonë të fuqishëm 'capacitor-save-as' për të hapur dialogun zyrtar SAF (DocumentsUI)
+                              await SaveAs.showSaveAsPicker({
+                                  filename: filename,
+                                  mimeType: mimeType,
+                                  data: base64data
+                              });
+                              
+                              showToast(t("Skedari u ruajt me sukses!", "File saved successfully!"));
+                          }
                       } catch (e: any) {
                           console.error("Capacitor SAF save error:", e);
                           
@@ -9711,10 +9742,18 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 								<button
 									onClick={async () => {
 										if (Capacitor.isNativePlatform()) {
-											showToast(t(
-												"Në celular, sistemi SAF hapet automatikisht gjatë ruajtjes së skedarit për t'ju lejuar të zgjidhni çdo dosje!",
-												"On mobile, the SAF system opens automatically during file save to let you select any folder!"
-											));
+											try {
+												showToast(t("Ju lutem zgjidhni dosjen ku dëshironi të ruhen skedarët përgjithmonë...", "Please select the folder where you want files to be saved permanently..."));
+												const res = await (SaveAs as any).selectDirectory();
+												if (res && res.uri) {
+													setNativeSaveDirectoryUri(res.uri);
+													localStorage.setItem('native_save_directory_uri', res.uri);
+													showToast(t("Dosja u përzgjodh dhe u ruajt me sukses! Tani të gjitha shkarkimet do të ruhen automatikisht aty.", "Folder selected and saved successfully! Now all downloads will be saved there automatically."));
+												}
+											} catch (err: any) {
+												console.error("Native selectDirectory error:", err);
+												showToast(t("Zgjedhja e dosjes u anullua ose dështoi.", "Folder selection was cancelled or failed."));
+											}
 										} else {
 											if ('showDirectoryPicker' in window && window.self === window.top) {
 												try {
@@ -9736,6 +9775,51 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 									<FolderOpen className="w-3.5 h-3.5" />
 									{t('HAP ZGJEDHËSIN E DOSJES (ALLOW & SELECT)', 'OPEN FOLDER PICKER (ALLOW & SELECT)')}
 								</button>
+
+								{Capacitor.isNativePlatform() && nativeSaveDirectoryUri ? (
+									<div className="flex flex-col gap-2 mt-2 p-2.5 rounded-lg border border-green-500/20 bg-green-500/10 text-xs">
+										<div className="flex justify-between items-center gap-2">
+											<span className="font-semibold text-green-700 dark:text-green-400 truncate max-w-[160px]" title={nativeSaveDirectoryUri}>
+												📁 {t('Dosja e Ruajtur: Aktivizuar', 'Saved Folder: Active')}
+											</span>
+											<button
+												onClick={async () => {
+													try {
+														await (SaveAs as any).clearSelectedDirectory();
+														setNativeSaveDirectoryUri(null);
+														localStorage.removeItem('native_save_directory_uri');
+														showToast(t("Dosja e ruajtur u pastrua me sukses. Tani do t'ju kërkohet përsëri çdo herë.", "Saved folder cleared successfully. Now you will be prompted each time."));
+													} catch (e) {
+														console.error(e);
+													}
+												}}
+												className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white font-bold rounded text-[10px] uppercase cursor-pointer shrink-0"
+											>
+												{t('Pastro', 'Clear')}
+											</button>
+										</div>
+										<p className="text-[10px] text-zinc-500 dark:text-zinc-400 italic font-mono truncate">
+											{nativeSaveDirectoryUri}
+										</p>
+									</div>
+								) : !Capacitor.isNativePlatform() && saveDirectoryHandle ? (
+									<div className="flex flex-col gap-2 mt-2 p-2.5 rounded-lg border border-green-500/20 bg-green-500/10 text-xs">
+										<div className="flex justify-between items-center gap-2">
+											<span className="font-semibold text-green-700 dark:text-green-400 truncate max-w-[160px]">
+												📁 {t(`Dosja: ${saveDirectoryHandle.name}`, `Folder: ${saveDirectoryHandle.name}`)}
+											</span>
+											<button
+												onClick={() => {
+													setSaveDirectoryHandle(null);
+													showToast(t("Dosja e ruajtur u pastrua.", "Saved folder cleared."));
+												}}
+												className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white font-bold rounded text-[10px] uppercase cursor-pointer shrink-0"
+											>
+												{t('Pastro', 'Clear')}
+											</button>
+										</div>
+									</div>
+								) : null}
 							</div>
 						</div>
 <div className="h-px w-full my-1 border-b border-zinc-500/20"></div>
