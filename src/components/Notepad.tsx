@@ -71,7 +71,7 @@ const COLOR_THEMES = {
 
 export interface GridRow {
   id: string;
-  status: 'none' | 'ok' | 'blue' | 'x';
+  status: 'none' | 'ok' | 'blue' | 'yellow' | 'x';
   image?: string;
   col1?: string;
   col2?: string;
@@ -133,7 +133,7 @@ const LabelScrollingText: React.FC<LabelScrollingTextProps> = ({ label, textColo
     <div ref={containerRef} className="w-full overflow-hidden relative whitespace-nowrap">
       {isOverflowing ? (
         <div className="w-full overflow-hidden whitespace-nowrap relative">
-          <div className="inline-block animate-marquee-paused whitespace-nowrap font-extrabold text-xs sm:text-sm hover:[animation-play-state:paused]">
+          <div className="inline-block animate-marquee-8s whitespace-nowrap font-extrabold text-xs sm:text-sm hover:[animation-play-state:paused]">
             <span ref={textRef} className={`pr-6 ${textColor}`}>{label}</span>
             <span className={`pr-6 ${textColor}`}>{label}</span>
           </div>
@@ -384,6 +384,80 @@ const format = (date: Date, formatStr: string) => {
     .replace('HH', HH)
     .replace('mm', mm)
     .replace('ss', ss);
+};
+
+const idb_save_dir_handle = async (handle: any) => {
+  try {
+    const request = indexedDB.open('GridNotepadDB', 1);
+    request.onupgradeneeded = (e: any) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('handles')) {
+        db.createObjectStore('handles');
+      }
+    };
+    request.onsuccess = (e: any) => {
+      const db = e.target.result;
+      const tx = db.transaction('handles', 'readwrite');
+      const store = tx.objectStore('handles');
+      store.put(handle, 'saveDirectoryHandle');
+    };
+  } catch (err) {
+    console.error('IndexedDB save error:', err);
+  }
+};
+
+const idb_load_dir_handle = async (): Promise<any> => {
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.open('GridNotepadDB', 1);
+      request.onupgradeneeded = (e: any) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('handles')) {
+          db.createObjectStore('handles');
+        }
+      };
+      request.onsuccess = (e: any) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('handles')) {
+          resolve(null);
+          return;
+        }
+        const tx = db.transaction('handles', 'readonly');
+        const store = tx.objectStore('handles');
+        const getReq = store.get('saveDirectoryHandle');
+        getReq.onsuccess = () => {
+          resolve(getReq.result || null);
+        };
+        getReq.onerror = () => {
+          resolve(null);
+        };
+      };
+      request.onerror = () => {
+        resolve(null);
+      };
+    } catch (err) {
+      console.error('IndexedDB load error:', err);
+      resolve(null);
+    }
+  });
+};
+
+const verifyPermission = async (fileHandle: any, readWrite: boolean) => {
+  const options: any = {};
+  if (readWrite) {
+    options.mode = 'readwrite';
+  }
+  try {
+    if ((await fileHandle.queryPermission(options)) === 'granted') {
+      return true;
+    }
+    if ((await fileHandle.requestPermission(options)) === 'granted') {
+      return true;
+    }
+  } catch (err) {
+    console.error("verifyPermission error:", err);
+  }
+  return false;
 };
 
 export function Notepad() {
@@ -903,15 +977,21 @@ export function Notepad() {
 
   // Missing helper function
   const getAlbanianDateTime = () => {
-    const options: Intl.DateTimeFormatOptions = {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    };
-    return new Date().toLocaleDateString("sq-AL", options);
+    const d = new Date();
+    const day = d.getDate();
+    const month = d.getMonth() + 1;
+    const year = d.getFullYear();
+    const weekdays = [
+      "diel",
+      "hënë",
+      "martë",
+      "mërkurë",
+      "enjte",
+      "premte",
+      "shtunë"
+    ];
+    const weekday = weekdays[d.getDay()];
+    return `${day}/${month}/${year}/ ${weekday}`;
   };
 
   // Cell Long-Press / Hold refs and handlers
@@ -984,10 +1064,18 @@ export function Notepad() {
   };
 
   const getDirectoryHandle = async () => {
-    if (saveDirectoryHandle) return saveDirectoryHandle;
+    if (saveDirectoryHandle) {
+      try {
+        const hasPerm = await verifyPermission(saveDirectoryHandle, true);
+        if (hasPerm) return saveDirectoryHandle;
+      } catch (err) {
+        console.error("Permission check failed:", err);
+      }
+    }
     try {
       const handle = await (window as any).showDirectoryPicker();
       setSaveDirectoryHandle(handle);
+      await idb_save_dir_handle(handle);
       return handle;
     } catch (e) {
       console.error(e);
@@ -1009,6 +1097,14 @@ export function Notepad() {
       } catch (e) {
         console.error("SaveAs getSelectedDirectory error:", e);
       }
+    } else {
+      idb_load_dir_handle().then((handle) => {
+        if (handle) {
+          setSaveDirectoryHandle(handle);
+        }
+      }).catch(err => {
+        console.error("Error loading saved directory handle:", err);
+      });
     }
   }, []);
 
@@ -3723,13 +3819,14 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
          newRows.sort((a, b) => {
              const getOrder = (row: GridRow) => {
-                 if (row.status === 'ok') return 1;
-                 if (row.status === 'blue') return 2;
-                 if (row.status?.startsWith('tag-')) return 3;
-                 if (row.status === 'none' && hasContent(row)) return 4;
-                 if (row.status === 'x') return 5;
-                 return 6;
-             };
+                  if (row.status === 'ok') return 1;
+                  if (row.status === 'blue') return 2;
+                  if (row.status === 'yellow') return 3;
+                  if (row.status?.startsWith('tag-')) return 4;
+                  if (row.status === 'none' && hasContent(row)) return 5;
+                  if (row.status === 'x') return 6;
+                  return 7;
+              };
              
              const orderA = getOrder(a);
              const orderB = getOrder(b);
@@ -3949,7 +4046,23 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
               return;
           }
 
-          // Për Browser / PWA: Përdor Zgjedhësin Standard të Ruajtjes së Skedarëve nëse mbështetet
+          // Për Browser / PWA: Përdor Zgjedhësin Standard të Ruajtjes së Skedarëve ose Dosjen e Ruajtur nëse ekziston
+          if (!Capacitor.isNativePlatform() && saveDirectoryHandle) {
+              try {
+                  const hasPerm = await verifyPermission(saveDirectoryHandle, true);
+                  if (hasPerm) {
+                      const fileHandle = await saveDirectoryHandle.getFileHandle(filename, { create: true });
+                      const writable = await fileHandle.createWritable();
+                      await writable.write(blob);
+                      await writable.close();
+                      showToast(t(`Skedari "${filename}" u ruajt me sukses në dosjen tuaj!`, `File "${filename}" saved successfully in your folder!`));
+                      return;
+                  }
+              } catch (err: any) {
+                  console.error("Error saving to persistent directory handle:", err);
+              }
+          }
+
           if ('showSaveFilePicker' in window && window.self === window.top) {
               try {
                   const handle = await (window as any).showSaveFilePicker({
@@ -4046,48 +4159,194 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
     }
 
     const doc = new jsPDF();
-    let y = 20;
-    doc.setFontSize(16);
-    doc.text(title, 20, y);
-    y += 10;
-    doc.setFontSize(10);
-    
-    rows.forEach((r, i) => {
-       let hasAny = headers.some((_, c) => (r[`col${c+1}`] || '').toString().trim()) || r.image;
-       if (hasAny) {
-          let rowText = `Rrjeshti ${i+1}:`;
-          headers.forEach((h, c) => {
-             const val = (r[`col${c+1}`] || '').toString().trim();
-             if (val) rowText += `\n- ${h}: ${val.replace(/\n/g, ' ')}`;
-          });
-          
-          if (rowText.trim() !== `Rrjeshti ${i+1}:`) {
-              const split = doc.splitTextToSize(rowText, 170);
-              if (y + split.length * 5 > 280) {
-                 doc.addPage();
-                 y = 20;
-              }
-              doc.text(split, 20, y);
-              y += split.length * 5 + 5;
-          }
+    const pageWidth = 210;
+    const pageHeight = 297;
+    const margin = 10;
+    const printableWidth = pageWidth - (margin * 2); // 190mm
+    const rowNumWidth = 10;
+    const tableWidth = printableWidth - rowNumWidth; // 180mm
 
-          if (r.image) {
-              if (y + 45 > 280) {
-                 doc.addPage();
-                 y = 20;
-              }
-              // Add image. Format assumed JPEG/PNG. Data url usually has metadata.
-              try {
-                  doc.addImage(r.image, 'JPEG', 30, y, 40, 40);
-                  y += 45;
-              } catch (e) {
-                  // Fallback if image type unsupported by jspd
-                  doc.text('[Imazhi nuk mund të renderizohej]', 30, y);
-                  y += 10;
-              }
-          }
-          y += 5;
+    let y = 15;
+
+    // Title
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 41, 59); // slate-800
+    doc.text(title, margin, y);
+    
+    // Subtitle / Date
+    y += 6;
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 116, 139); // slate-500
+    const dateStr = format(new Date(), 'dd.MM.yyyy HH:mm');
+    doc.text(`Lista e Shënimeve • Shkarkuar më: ${dateStr}`, margin, y);
+
+    // Divider line
+    y += 4;
+    doc.setDrawColor(226, 232, 240); // slate-200
+    doc.setLineWidth(0.5);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 8;
+
+    // Column widths distribution
+    const actualWidths = headers.map((_, idx) => columnWidths[idx] || 150);
+    const sumWidths = actualWidths.reduce((a, b) => a + b, 0) || 1;
+    const pdfColWidths = actualWidths.map(w => (w / sumWidths) * tableWidth);
+
+    const truncateText = (text: string, maxWidth: number) => {
+      if (doc.getTextWidth(text) <= maxWidth) return text;
+      let temp = text;
+      while (temp.length > 0 && doc.getTextWidth(temp + '...') > maxWidth) {
+        temp = temp.slice(0, -1);
+      }
+      return temp ? temp + '...' : '';
+    };
+
+    const drawTableHeader = () => {
+      // Draw Table Header Background
+      doc.setFillColor(241, 245, 249); // slate-100
+      doc.rect(margin, y, printableWidth, 8, "F");
+
+      // Draw Header Text
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(51, 65, 85); // slate-700
+      
+      // Draw row number header
+      doc.text("Nr.", margin + 2, y + 5.5);
+
+      let currentX = margin + rowNumWidth;
+      headers.forEach((h, idx) => {
+        const colW = pdfColWidths[idx];
+        const truncatedHeader = truncateText(h, colW - 4);
+        doc.text(truncatedHeader, currentX + 2, y + 5.5);
+        currentX += colW;
+      });
+
+      // Bottom border for header
+      doc.setDrawColor(203, 213, 225); // slate-300
+      doc.setLineWidth(0.3);
+      doc.line(margin, y + 8, margin + printableWidth, y + 8);
+      y += 8;
+    };
+
+    drawTableHeader();
+
+    rows.forEach((r, rIndex) => {
+       const hasAny = headers.some((_, c) => (r[`col${c+1}`] || '').toString().trim()) || r.image;
+       if (!hasAny) return; // skip empty rows
+
+       // Wrap text for each cell
+       const cellTexts = headers.map((_, idx) => {
+         const val = (r[`col${idx+1}`] || '').toString();
+         return doc.splitTextToSize(val, pdfColWidths[idx] - 4);
+       });
+
+       // Find maximum lines across all cells
+       const maxLines = Math.max(1, ...cellTexts.map(lines => lines.length));
+       
+       // Calculate row height (minimum 8mm, or based on lines)
+       let rowHeight = Math.max(8, maxLines * 4.5 + 3.5);
+       
+       let imageHeight = 0;
+       if (r.image) {
+         imageHeight = 45; // image container size
+         rowHeight += imageHeight + 2;
        }
+
+       // Check for page break
+       if (y + rowHeight > 280) {
+         doc.addPage();
+         y = 15;
+         drawTableHeader();
+       }
+
+       // Set color scheme based on status
+       let bgColor = [255, 255, 255]; // white
+       let borderColor = [226, 232, 240]; // slate-200
+       let textColor = [51, 65, 85]; // slate-700
+       let drawLineThrough = false;
+
+       if (r.status === 'ok') {
+         bgColor = [230, 244, 234]; // light-green
+         borderColor = [163, 217, 180];
+         textColor = [19, 115, 51];
+       } else if (r.status === 'blue') {
+         bgColor = [232, 240, 254]; // light-blue
+         borderColor = [164, 198, 249];
+         textColor = [26, 115, 232];
+       } else if (r.status === 'yellow') {
+         bgColor = [254, 247, 224]; // light-yellow
+         borderColor = [247, 212, 114];
+         textColor = [150, 90, 0];
+       } else if (r.status === 'x') {
+         bgColor = [252, 232, 230]; // light-red
+         borderColor = [244, 175, 169];
+         textColor = [197, 34, 31];
+         drawLineThrough = true;
+       }
+
+       // Draw Row Background
+       doc.setFillColor(bgColor[0], bgColor[1], bgColor[2]);
+       doc.rect(margin, y, printableWidth, rowHeight, "F");
+
+       // Draw cell contents
+       doc.setFontSize(8.5);
+       doc.setFont("helvetica", "normal");
+       doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+
+       // Row Number
+       doc.text(`${rIndex + 1}`, margin + 2, y + 5.5);
+
+       let currentX = margin + rowNumWidth;
+       headers.forEach((_, idx) => {
+         const colW = pdfColWidths[idx];
+         const lines = cellTexts[idx];
+         
+         lines.forEach((line, lineIdx) => {
+           const lineY = y + 5.5 + (lineIdx * 4.5);
+           doc.text(line, currentX + 2, lineY);
+
+           if (drawLineThrough) {
+             const textWidth = doc.getTextWidth(line);
+             doc.setDrawColor(textColor[0], textColor[1], textColor[2]);
+             doc.setLineWidth(0.4);
+             doc.line(currentX + 2, lineY - 1.2, currentX + 2 + textWidth, lineY - 1.2);
+           }
+         });
+         
+         currentX += colW;
+       });
+
+       // Draw Image if any
+       if (r.image) {
+         const imgY = y + (maxLines * 4.5) + 4;
+         try {
+           doc.addImage(r.image, 'JPEG', margin + 12, imgY, 40, 40);
+         } catch (e) {
+           doc.setFont("helvetica", "italic");
+           doc.setTextColor(150, 150, 150);
+           doc.text('[Imazhi nuk mund të renderizohej]', margin + 12, imgY + 5);
+         }
+       }
+
+       // Draw Cell Borders
+       doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+       doc.setLineWidth(0.2);
+       doc.line(margin, y + rowHeight, margin + printableWidth, y + rowHeight); // bottom line
+       
+       let vX = margin;
+       doc.line(vX, y, vX, y + rowHeight); // left border
+       vX += rowNumWidth;
+       doc.line(vX, y, vX, y + rowHeight); // row num separator
+       
+       pdfColWidths.forEach(colW => {
+         vX += colW;
+         doc.line(vX, y, vX, y + rowHeight); // cell separator
+       });
+
+       y += rowHeight;
     });
 
     const performSave = async (docObj: jsPDF, filename: string) => {
@@ -5944,6 +6203,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                       className={`flex min-h-[28px] items-center transition-colors ${
                                          r.status === 'ok' ? (isDark ? 'bg-green-500/10 border-green-500/20' : 'bg-green-50 border-green-100')
                                          : r.status === 'blue' ? (isDark ? 'bg-blue-500/10 border-blue-500/20' : 'bg-blue-50 border-blue-100')
+                                         : r.status === 'yellow' ? (isDark ? 'bg-yellow-500/10 border-yellow-500/20' : 'bg-yellow-50 border-yellow-100')
                                          : r.status === 'x' ? (isDark ? 'bg-red-500/10 border-red-500/20 line-through' : 'bg-red-50 border-red-100 line-through')
                                          : isDark ? "border-zinc-800/40 focus-within:bg-zinc-900/40" : "border-zinc-200/40 focus-within:bg-zinc-50"
                                       }`}
@@ -5952,7 +6212,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                       <div 
                                          onClick={() => {
                                             if (isOnlineEditing) {
-                                               const statuses = ["none", "ok", "blue", "x"];
+                                               const statuses = ["none", "ok", "blue", "yellow", "x"];
                                                const currentIdx = statuses.indexOf(r.status || "none");
                                                const nextStatus = statuses[(currentIdx + 1) % statuses.length];
                                                
@@ -6012,6 +6272,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                                                   <span className={`text-xs px-1 block break-all whitespace-pre-wrap leading-tight ${
                                                      r.status === 'x' ? "line-through text-red-500/70" 
                                                      : r.status === 'blue' ? "text-blue-500 font-semibold"
+                                                     : r.status === 'yellow' ? "text-yellow-600 dark:text-yellow-400 font-semibold"
                                                      : r.status === 'ok' ? "text-green-600 font-semibold"
                                                      : isDark ? "text-zinc-300" : "text-zinc-800"
                                                   }`}>
@@ -9513,7 +9774,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
            {renderOnlineDashboard()}
            {renderSharedModals()}
            {toastMessage && (
-              <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-accent-600 text-white px-4 py-2 rounded-lg shadow-lg font-medium text-sm animate-in fade-in slide-in-from-top-4 z-[300]">
+              <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-accent-600 text-white px-4 py-2 rounded-lg shadow-lg font-medium text-sm animate-in fade-in slide-in-from-bottom-4 z-[300] pointer-events-none">
                  {toastMessage}
               </div>
            )}
@@ -9759,6 +10020,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 												try {
 													const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
 													setSaveDirectoryHandle(handle);
+													await idb_save_dir_handle(handle);
 													showToast(t(`U zgjodh me sukses dosja: ${handle.name}`, `Successfully selected folder: ${handle.name}`));
 												} catch (err: any) {
 													if (err.name !== 'AbortError') {
@@ -9811,6 +10073,18 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 											<button
 												onClick={() => {
 													setSaveDirectoryHandle(null);
+													try {
+														const request = indexedDB.open('GridNotepadDB', 1);
+														request.onsuccess = (e: any) => {
+															const db = e.target.result;
+															if (db.objectStoreNames.contains('handles')) {
+																const tx = db.transaction('handles', 'readwrite');
+																tx.objectStore('handles').delete('saveDirectoryHandle');
+															}
+														};
+													} catch (err) {
+														console.error("Error clearing IndexedDB directory handle:", err);
+													}
 													showToast(t("Dosja e ruajtur u pastrua.", "Saved folder cleared."));
 												}}
 												className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white font-bold rounded text-[10px] uppercase cursor-pointer shrink-0"
@@ -9860,15 +10134,15 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
          </div>
          
          <div className={`px-4 py-2 border-b flex flex-col gap-2 ${isDark ? "border-zinc-800 bg-zinc-900/50" : "border-zinc-200 bg-zinc-50/80"}`}>
-            <div className="flex flex-nowrap w-full gap-2 items-center overflow-x-auto scrollbar-hide snap-x pb-0.5">
-               <button onClick={exportAllPdf} className={`flex-shrink-0 snap-start flex justify-center items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg transition-colors border active:scale-95 ${
-                 isDark ? "bg-red-600 hover:bg-red-500 text-white shadow-md border-transparent" : "bg-red-500 hover:bg-red-600 text-white shadow-md font-bold border-transparent"
+            <div className="flex flex-row gap-2 w-full items-center pb-0.5">
+               <button onClick={exportAllPdf} className={`flex-1 flex justify-center items-center gap-1 px-1.5 py-1.5 text-xs font-bold rounded-xl transition-all active:scale-95 shadow-sm ${
+                 isDark ? "bg-red-600 hover:bg-red-500 text-white" : "bg-red-500 hover:bg-red-600 text-white"
                }`}>
                  <FolderDown className="w-3.5 h-3.5" /> PDF
                </button>
 
-               <button onClick={() => executeProtectedAction(() => setBlueModal(true))} className={`flex-shrink-0 snap-start flex justify-center items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg transition-colors border active:scale-95 ${
-                 isDark ? "bg-blue-600 hover:bg-blue-500 text-white shadow-md border-transparent" : "bg-blue-500 hover:bg-blue-600 text-white shadow-md font-bold border-transparent"
+               <button onClick={() => executeProtectedAction(() => setBlueModal(true))} className={`flex-1 flex justify-center items-center gap-1 px-1.5 py-1.5 text-xs font-bold rounded-xl transition-all active:scale-95 shadow-sm ${
+                 isDark ? "bg-blue-600 hover:bg-blue-500 text-white" : "bg-blue-500 hover:bg-blue-600 text-white"
                }`}>
                  <Lock className="w-3.5 h-3.5" /> Sekrete
                </button>
@@ -9877,8 +10151,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                   onClick={() => {
                      executeProtectedAction(() => setShowCloudSelectionModal(true));
                   }} 
-                  className={`flex-shrink-0 snap-start flex justify-center items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg transition-all border shadow-md active:scale-95 ${
-                    isDark ? "bg-green-600 hover:bg-green-500 text-white border-transparent" : "bg-green-500 hover:bg-green-600 text-white border-transparent font-bold"
+                  className={`flex-1 flex justify-center items-center gap-1 px-1.5 py-1.5 text-xs font-bold rounded-xl transition-all active:scale-95 shadow-sm ${
+                    isDark ? "bg-green-600 hover:bg-green-500 text-white" : "bg-green-500 hover:bg-green-600 text-white"
                   }`}
                   title="Zgjidhni platformën Cloud Firebase ose Gist"
                 >
@@ -9886,16 +10160,10 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 </button>
 
 
-                <button onClick={() => setAiChatModal(true)} className={`flex-shrink-0 snap-start flex justify-center items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg transition-colors border active:scale-95 ${
-                  isDark ? "bg-purple-600 hover:bg-purple-500 text-white shadow-md border-transparent" : "bg-purple-500 hover:bg-purple-600 text-white shadow-md font-bold border-transparent"
+                <button onClick={() => setAiChatModal(true)} className={`flex-1 flex justify-center items-center gap-1 px-1.5 py-1.5 text-xs font-bold rounded-xl transition-all active:scale-95 shadow-sm ${
+                  isDark ? "bg-purple-600 hover:bg-purple-500 text-white" : "bg-purple-500 hover:bg-purple-600 text-white"
                 }`}>
                   <Sparkles className="w-3.5 h-3.5" /> AI Chat
-                </button>
-
-                <button onClick={() => setShowDownloadAppModal(true)} className={`flex-shrink-0 snap-start flex justify-center items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg transition-colors border active:scale-95 ${
-                  isDark ? "bg-zinc-800 hover:bg-zinc-700 text-amber-400 shadow-md border-zinc-700" : "bg-amber-50 hover:bg-amber-100 text-amber-800 shadow-sm border-amber-300 font-bold"
-                }`} title={t("Shkarko aplikacionin (APK) ose shiko Repo / GitHub Actions", "Download App (APK) or view Repo / GitHub Actions")}>
-                  <Download className="w-3.5 h-3.5" /> APK / App
                 </button>
              </div>
             
@@ -10487,7 +10755,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
          {/* TOAST CUSTOM */}
          {toastMessage && (
-            <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-accent-600 text-white px-4 py-2 rounded-lg shadow-lg font-medium text-sm animate-in fade-in slide-in-from-top-4 z-[300]">
+            <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-accent-600 text-white px-4 py-2 rounded-lg shadow-lg font-medium text-sm animate-in fade-in slide-in-from-bottom-4 z-[300] pointer-events-none">
                {toastMessage}
             </div>
          )}
@@ -10505,247 +10773,275 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
       >
         
         {/* TOOLBAR */}
-      <div className={`flex flex-wrap border-b py-0.5 px-1 sm:py-1 sm:px-1.5 gap-x-1 gap-y-1 items-center justify-between shadow-sm z-30 sticky top-0 ${toolbarBg} ${borderColor}`}>
-        <div className="flex flex-col flex-grow min-w-[100px] max-w-[200px] relative">
-           <HeaderInput 
-              initialValue={title}
-              onChange={(val: string) => {
-                  setTitle(val);
-                  updateActiveDocumentState(val, rows, headers, columnWidths, activeTags);
-              }}
-              className={`font-semibold text-sm px-2 py-1 rounded w-full border transition-colors outline-none focus:border-accent-500 ${isDark ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-300 text-zinc-900"}`}
-              placeholder={t("Titulli i Shënimit", "Note Title")}
-           />
-           {autoSaveMsg && (
-              <span className="text-[10px] text-accent-500 font-medium px-2 py-0.5 animate-in fade-in slide-in-from-top-1 absolute top-[35px] z-50 rounded bg-white dark:bg-zinc-900 shadow-md border dark:border-zinc-800 border-zinc-200">{autoSaveMsg}</span>
-           )}
-        </div>
-        
-        <div className="flex items-center relative flex-grow min-w-[100px] max-w-[160px]">
-           <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
-           <input 
-              value={docSearch}
-              onChange={(e) => setDocSearch(e.target.value)}
-              placeholder={t("Kërko...", "Search...")}
-              className={`w-full pl-7 pr-2 py-1 text-xs rounded border transition-colors outline-none focus:border-accent-500 ${isDark ? "bg-zinc-900 border-zinc-800 text-white placeholder-zinc-500" : "bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400"}`}
-           />
-        </div>
-        
-        <div className="flex flex-wrap items-center gap-1 border-l pl-2 mr-1 lg:mr-0 border-zinc-500/30">
-                {/* New Text Settings Buttons */}
-            <div className="relative">
-                <button onClick={() => { setShowTextMenu(!showTextMenu); setShowTextColorMenu(false); }} className={`p-1.5 rounded transition-colors ${isDark ? "bg-zinc-700 text-white hover:bg-zinc-600 shadow-sm" : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300 shadow-sm"}`} title={t("Madhësia & Trashësia", "Size & Weight")}>
-                   <Type className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                </button>
-                {showTextMenu && (
-                   <>
-                       <div className="fixed inset-0 z-[140]" onClick={() => setShowTextMenu(false)} />
-                       <div className={`absolute left-0 lg:left-1/2 lg:-translate-x-1/2 top-full mt-2 p-3 rounded-xl border shadow-xl z-[150] flex flex-col gap-3 w-[220px] ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"}`}>
-                          <div className="flex flex-col gap-1.5">
-                             <div className={`flex justify-between text-xs font-bold ${isDark ? 'text-zinc-400' : 'text-zinc-600'}`}>
-                                 <span>{t('Zmadhim', 'Zoom')}</span>
-                                 <span>{textSize}px</span>
-                             </div>
-                             <input type="range" min="10" max="32" step="1" value={textSize} onChange={(e) => updateTextSize(parseInt(e.target.value))} className="w-full accent-accent-500" />
-                          </div>
-                          <div className="h-px w-full bg-zinc-500/20"></div>
-                          <div className="flex flex-col gap-1.5">
-                             <div className={`flex justify-between text-xs font-bold ${isDark ? 'text-zinc-400' : 'text-zinc-600'}`}>
-                                 <span>{t('Trashësi', 'Weight')}</span>
-                                 <span>{textWeight}</span>
-                             </div>
-                             <input type="range" min="100" max="900" step="100" value={textWeight} onChange={(e) => updateTextWeight(parseInt(e.target.value))} className="w-full accent-accent-500" />
-                          </div>
-                       </div>
-                   </>
-                )}
-            </div>
+        <div className={`flex flex-col border-b shadow-sm z-30 sticky top-0 ${toolbarBg} ${borderColor}`}>
+           {/* Row 1: Title, Search & Return (App bar style) */}
+           <div className="flex items-center justify-between py-1.5 px-3 gap-2.5 w-full">
+              <div className="flex items-center gap-2 flex-1">
+                 <button onClick={() => setShowConfirmClose(true)} className={`h-8 w-8 rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-md shrink-0 ${
+                       isDark ? "bg-zinc-800 hover:bg-zinc-700 text-white shadow-zinc-950/20" : "bg-zinc-100 hover:bg-zinc-200 text-zinc-900 shadow-zinc-100"
+                    }`} title={t("Kthehu", "Return")}>
+                    <ArrowLeft className="w-4 h-4" />
+                 </button>
+                 <div className="flex flex-col flex-1 max-w-[180px] sm:max-w-[240px] relative">
+                    <HeaderInput 
+                       initialValue={title}
+                       onChange={(val: string) => {
+                          setTitle(val);
+                          updateActiveDocumentState(val, rows, headers);
+                       }}
+                       className={`text-sm sm:text-base font-bold bg-transparent focus:outline-none focus:text-accent-500 transition-colors truncate ${
+                          isDark ? "text-zinc-100 placeholder-zinc-700" : "text-zinc-900 placeholder-zinc-400"
+                       }`}
+                       placeholder={t("Pa Titull", "Untitled")}
+                    />
+                 </div>
+              </div>
 
-            <div className="relative">
-                <button onClick={() => { setShowTextColorMenu(!showTextColorMenu); setShowTextMenu(false); }} className={`p-1.5 rounded transition-colors ${isDark ? "bg-zinc-700 text-white hover:bg-zinc-600 shadow-sm" : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300 shadow-sm"}`} title={t("Ngjyra e Tekstit", "Text Color")}>
-                   <Palette className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                </button>
-                {showTextColorMenu && (
-                   <>
-                       <div className="fixed inset-0 z-[140]" onClick={() => setShowTextColorMenu(false)} />
-                       <div className={`absolute left-0 lg:left-1/2 lg:-translate-x-1/2 top-full mt-2 p-2 rounded-xl border shadow-xl z-[150] flex flex-col gap-1.5 w-[200px] ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"}`}>
-                          <div className="text-[10px] font-bold uppercase text-zinc-500 px-1 mb-1 border-b border-zinc-500/20 pb-1">{t('Zgjidh Ngjyrën', 'Choose Color')}</div>
-                          <div className="grid grid-cols-4 gap-1.5">
-                             {TEXT_COLORS.map(c => (
-                                <button key={c.id} onClick={() => { updateTextColorMode(c.id); setShowTextColorMenu(false); }} className={`w-7 h-7 rounded-[4px] shadow-sm border-2 ${textColorMode === c.id ? 'border-accent-500 scale-110' : 'border-black/10 hover:scale-110'} transition-transform`} style={{ backgroundColor: c.id === 'default' ? (isDark ? '#52525b' : '#a1a1aa') : c.id }} title={c.name} />
-                             ))}
-                          </div>
-                       </div>
-                   </>
-                )}
-            </div>
-            
-            <div className="h-4 w-px bg-zinc-500/30 mx-1"></div>
+              {/* Search Input for active document */}
+              <div className="relative max-w-[120px] sm:max-w-[180px] shrink-0">
+                 <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                 <input
+                    type="text"
+                    value={docSearch}
+                    onChange={(e) => setDocSearch(e.target.value)}
+                    placeholder={t("Kërko...", "Search...")}
+                    className={`w-full pl-8 pr-2 py-1 text-xs rounded-lg border focus:outline-none focus:border-accent-500 ${
+                       isDark 
+                          ? "bg-zinc-800 border-zinc-700 text-zinc-200 placeholder-zinc-500" 
+                          : "bg-zinc-100 border-zinc-200 text-zinc-800 placeholder-zinc-400"
+                    }`}
+                 />
+                 {docSearch && (
+                    <button 
+                       onClick={() => setDocSearch("")} 
+                       className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 font-bold text-[10px]"
+                    >
+                       ✕
+                    </button>
+                 )}
+              </div>
+           </div>
 
-            <button onClick={() => updateSelectedRowsStatus('ok')} className={`p-1.5 rounded transition-colors ${isDark ? "bg-green-600/90 text-white hover:bg-green-500 shadow-sm" : "bg-green-500/90 text-white hover:bg-green-600 shadow-sm"}`} title={t("Në rregull", "Ok")}>
-               <Check className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-            </button>
-            <button onClick={() => updateSelectedRowsStatus('blue')} className={`p-1.5 rounded transition-colors ${isDark ? "bg-blue-600/90 text-white hover:bg-blue-500 shadow-sm" : "bg-blue-500/90 text-white hover:bg-blue-600 shadow-sm"}`} title={t("Sekrete / Rëndësi", "Secret / Important")}>
-               <Lock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-            </button>
-            <button onClick={() => updateSelectedRowsStatus('x')} className={`p-1.5 rounded transition-colors ${isDark ? "bg-red-600/90 text-white hover:bg-red-500 shadow-sm" : "bg-red-500/90 text-white hover:bg-red-600 shadow-sm"}`} title={t("E Pavlefshme", "Invalid")}>
-               <X className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-            </button>
-            <button onClick={() => updateSelectedRowsStatus('none')} className={`p-1.5 rounded transition-colors ${isDark ? "bg-zinc-700 text-white hover:bg-zinc-600 shadow-sm font-bold" : "bg-zinc-300 text-zinc-900 hover:bg-zinc-400 shadow-sm font-bold"}`} title={t("Hiq Statusin", "Remove Status")}>
-               <Unlock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-            </button>
-            
-            <div className="relative">
-               <button onClick={() => { setShowTagColorMenu(!showTagColorMenu); setShowTextColorMenu(false); setShowTextMenu(false); }} className={`p-1.5 rounded transition-colors ${isDark ? "bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700 shadow-sm" : "bg-zinc-200 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-300 shadow-sm"}`} title={t("Ngjyra e Etiketës (Tag)", "Tag Color")}>
-                  <Tag className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-               </button>
-               {showTagColorMenu && (
-                   <>
-                       <div className="fixed inset-0 z-[140]" onClick={() => setShowTagColorMenu(false)}></div>
-                       <div className={`absolute right-0 sm:left-1/2 sm:-translate-x-1/2 top-full mt-2 p-2 rounded-xl border shadow-xl z-[150] flex flex-col gap-1.5 w-[200px] ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"}`}>
-                           <div className="text-[10px] font-bold uppercase text-zinc-500 px-1 mb-1 border-b border-zinc-500/20 pb-1">{t('Etiketë me Ngjyrë', 'Color Tag')}</div>
+                      {/* Row 2: Grid of all formatting and action tools */}
+           <div className="flex flex-wrap items-center gap-1.5 py-1.5 px-3 border-t border-zinc-500/10 w-full bg-zinc-50/5 dark:bg-zinc-900/5 ">
+             <div className="relative shrink-0">
+                 <button onClick={() => { setShowTextMenu(!showTextMenu); setShowTextColorMenu(false); }} className={`h-8 w-8 rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-md ${isDark ? "bg-zinc-700 text-white hover:bg-zinc-600" : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"}`} title={t("Madhësia & Trashësia", "Size & Weight")}>
+                    <Type className="w-4 h-4" />
+                 </button>
+                 {showTextMenu && (
+                    <>
+                        <div className="fixed inset-0 z-[140]" onClick={() => setShowTextMenu(false)} />
+                        <div className={`absolute left-0 top-full mt-2 p-3 rounded-xl border shadow-xl z-[150] flex flex-col gap-3 w-[220px] ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"}`}>
+                           <div className="flex flex-col gap-1.5">
+                              <div className={`flex justify-between text-xs font-bold ${isDark ? 'text-zinc-400' : 'text-zinc-600'}`}>
+                                  <span>{t('Zmadhim', 'Zoom')}</span>
+                                  <span>{textSize}px</span>
+                              </div>
+                              <input type="range" min="10" max="32" step="1" value={textSize} onChange={(e) => updateTextSize(parseInt(e.target.value))} className="w-full accent-accent-500" />
+                           </div>
+                           <div className="h-px w-full bg-zinc-500/20"></div>
+                           <div className="flex flex-col gap-1.5">
+                              <div className={`flex justify-between text-xs font-bold ${isDark ? 'text-zinc-400' : 'text-zinc-600'}`}>
+                                  <span>{t('Trashësi', 'Weight')}</span>
+                                  <span>{textWeight}</span>
+                              </div>
+                              <input type="range" min="100" max="900" step="100" value={textWeight} onChange={(e) => updateTextWeight(parseInt(e.target.value))} className="w-full accent-accent-500" />
+                           </div>
+                        </div>
+                    </>
+                 )}
+             </div>
+
+             <div className="relative shrink-0">
+                 <button onClick={() => { setShowTextColorMenu(!showTextColorMenu); setShowTextMenu(false); }} className={`h-8 w-8 rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-md ${isDark ? "bg-zinc-700 text-white hover:bg-zinc-600" : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"}`} title={t("Ngjyra e Tekstit", "Text Color")}>
+                    <Palette className="w-4 h-4" />
+                 </button>
+                 {showTextColorMenu && (
+                    <>
+                        <div className="fixed inset-0 z-[140]" onClick={() => setShowTextColorMenu(false)} />
+                        <div className={`absolute left-0 top-full mt-2 p-2 rounded-xl border shadow-xl z-[150] flex flex-col gap-1.5 w-[200px] ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"}`}>
+                           <div className="text-[10px] font-bold uppercase text-zinc-500 px-1 mb-1 border-b border-zinc-500/20 pb-1">{t('Zgjidh Ngjyrën', 'Choose Color')}</div>
                            <div className="grid grid-cols-4 gap-1.5">
-                              {TAG_COLORS.map(c => (
-                                 <button key={c.id} onClick={() => { updateSelectedRowsStatus(c.id); setShowTagColorMenu(false); }} className={`w-7 h-7 rounded-[4px] shadow-sm border-2 border-black/10 hover:scale-110 transition-transform`} style={{ backgroundColor: c.color }} title={c.name} />
+                              {TEXT_COLORS.map(c => (
+                                 <button key={c.id} onClick={() => { updateTextColorMode(c.id); setShowTextColorMenu(false); }} className={`w-7 h-7 rounded-[4px] shadow-sm border-2 ${textColorMode === c.id ? 'border-accent-500 scale-110' : 'border-black/10 hover:scale-110'} transition-transform`} style={{ backgroundColor: c.id === 'default' ? (isDark ? '#52525b' : '#a1a1aa') : c.id }} title={c.name} />
                               ))}
                            </div>
-                       </div>
-                   </>
-               )}
-            </div>
-            <div className="h-4 w-px bg-zinc-500/30 mx-1"></div>
-            <div className="flex items-center gap-1">
-                  <span className="text-[10px] text-zinc-500 font-medium tracking-wide uppercase mr-1 hidden sm:inline">{t('Kolonat', 'Cols')}:</span>
-                  <button onClick={() => {
-                     executeProtectedAction(() => {
-                         if(headers.length > 1) {
-                             const newH = [...headers];
-                             newH.pop();
-                             setHeaders(newH);
-                             const newW = [...columnWidths];
-                             newW.pop();
-                             setColumnWidths(newW);
-                             updateActiveDocumentState(title, rows, newH, newW);
-                         }
-                     });
-                  }} title={t("Hiq Kolonë", "Remove Column")} className={`p-1.5 rounded transition-colors ${isDark ? "text-zinc-400 hover:text-red-500 hover:bg-red-500/10" : "text-zinc-500 hover:text-red-600 hover:bg-red-50"}`}>
-                     <Minus className="w-3.5 h-3.5 border border-current rounded-full" />
-                  </button>
-                  <span className={`text-[11px] font-bold min-w-[12px] text-center ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{headers.length}</span>
-                  <button onClick={() => {
-                     executeProtectedAction(() => {
-                         if(headers.length < 8) {
-                             const newH = [...headers, `${t('Kolona', 'Col')} ${headers.length + 1}`];
-                             setHeaders(newH);
-                             const newW = [...columnWidths, 150];
-                             setColumnWidths(newW);
-                             updateActiveDocumentState(title, rows, newH, newW);
-                         }
-                     });
-                  }} title={t("Shto Kolonë", "Add Column")} className={`p-1.5 rounded transition-colors ${isDark ? "text-zinc-400 hover:text-green-500 hover:bg-green-500/10" : "text-zinc-500 hover:text-green-600 hover:bg-green-50"}`}>
-                     <Plus className="w-3.5 h-3.5 border border-current rounded-full" />
-                  </button>
-                  <div className="h-4 w-px bg-zinc-500/30 mx-1"></div>
-                  <button onClick={() => setPreviewSelectedRows(true)} title={t("Shfaq Rrjeshtat e Shenjuar", "View Selected Rows")} className={`p-1.5 rounded transition-colors ${isDark ? "text-zinc-400 hover:text-accent-500 hover:bg-accent-500/10" : "text-zinc-500 hover:text-accent-600 hover:bg-accent-50"}`}>
-                     <Eye className="w-4 h-4" />
-                  </button>
-             </div>
-         </div>
-        
-        <div className="flex flex-wrap gap-1 lg:w-auto lg:min-w-max lg:ml-auto items-center mt-1 lg:mt-0 order-last lg:order-none justify-end">
-          <span className={`text-[10px] sm:text-xs font-semibold mr-auto lg:mr-2 tracking-wide flex items-center gap-1.5 px-2 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
-             <Calendar className="w-3.5 h-3.5" /> {getAlbanianDateTime()}
-          </span>
-          <button onClick={() => setAiChatModal(true)} className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded transition-colors ${
-            isDark ? "bg-accent-600 hover:bg-accent-500 text-white shadow-md border-transparent" : "bg-accent-500 hover:bg-accent-600 text-white shadow-md font-bold border-transparent"
-          }`} title={t("Analizo me AI", "Analyze with AI")}>
-            <Sparkles className="w-3.5 h-3.5 shrink-0" /> <span className="hidden sm:inline">{t('AI Chat', 'AI Chat')}</span>
-          </button>
-          
-          <button onClick={saveCurrentDocument} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-accent-600 hover:bg-accent-700 text-white text-[11px] sm:text-xs font-bold rounded transition-colors shadow-sm">
-            <Save className="w-3.5 h-3.5 shrink-0" /> <span className="hidden sm:inline">{t('Ruaj', 'Save')}</span>
-          </button>
-          
-          {selectedRows.size > 0 ? (
-             <button onClick={() => executeProtectedAction(() => setShowConfirmDeleteSelected(true))} className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded transition-colors ${
-               isDark ? "bg-red-600 hover:bg-red-500 text-white" : "bg-red-500 hover:bg-red-600 text-white"
-             }`}>
-               <Trash2 className="w-3.5 h-3.5 shrink-0" /> <span>{t('Fshi', 'Delete')} ({selectedRows.size})</span>
-             </button>
-          ) : (
-             <button onClick={() => executeProtectedAction(() => setShowConfirmClear(true))} className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] sm:text-xs font-bold rounded transition-colors border ${
-               isDark ? "bg-red-600 hover:bg-red-500 text-white shadow-md border-transparent" : "bg-red-50 bg-red-500/90 text-white hover:bg-red-600 shadow-sm border-red-200"
-             }`}>
-               <Trash2 className="w-3.5 h-3.5 shrink-0" /> <span className="hidden sm:inline">{t('Bosh', 'Clear')}</span>
-             </button>
-          )}
-
-          <button onClick={() => setShowConfirmClose(true)} className={`flex items-center gap-1.5 px-4 py-1.5 text-[11px] sm:text-xs font-bold rounded transition-colors ${
-              isDark ? "bg-zinc-700 hover:bg-zinc-600 text-white shadow-md font-bold" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 shadow-md font-bold border-transparent"
-            }`} title={t("Kthehu", "Return")}>
-            <LogOut className="w-3.5 h-3.5 shrink-0" /> <span className="hidden sm:inline">{t('Kthehu', 'Return')}</span>
-          </button>
-        </div>
-        
-        <div className="flex items-center gap-1.5 min-w-max border-l pl-2 border-zinc-500/30">
-                  <div className="relative">
-                     <button 
-                       onClick={() => setShowThemeMenu(!showThemeMenu)}
-                       className={`p-1.5 rounded-full transition-colors ${isDark ? "bg-accent-600 hover:bg-accent-500 text-white shadow-md border-transparent" : "bg-accent-500 hover:bg-accent-600 text-white shadow-md font-bold border-transparent"}`}
-                       title="Ndërro Ngjyrën"
-                     >
-                       <Palette className="w-3.5 h-3.5" />
-                     </button>
-                     {showThemeMenu && (
-                        <div className={`fixed right-4 top-[100px] sm:absolute sm:right-0 sm:top-full mt-2 p-2 rounded-xl border shadow-xl z-[100] flex items-center gap-3 w-[220px] max-w-[calc(100vw-32px)] overflow-x-auto scrollbar-default touch-pan-x ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"}`}>
-                           {(Object.keys(COLOR_THEMES) as Array<keyof typeof COLOR_THEMES>).map(c => (
-                              <button key={c} onClick={() => { setAccentColor(c); setShowThemeMenu(false); }} className="w-8 h-8 shrink-0 rounded-full border-2 border-black/10 transition-transform hover:scale-110 shadow-sm" style={{ backgroundColor: c === 'kontrast' ? '#000000' : COLOR_THEMES[c][500] }} title={c === 'kontrast' ? 'Kontrast i Lartë' : c} />
-                           ))}
                         </div>
-                     )}
-                  </div>
-          
-          <button 
-            onClick={toggleTheme}
-            className={`p-1.5 rounded-full transition-colors ${isDark ? "bg-yellow-600 hover:bg-yellow-500 text-white shadow-md border-transparent" : "bg-zinc-800 hover:bg-zinc-700 text-white shadow-md font-bold border-transparent"}`}
-          >
-            {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-          </button>
-
-          <div className="flex gap-1">
-             <button onClick={exportTxt} className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
-               isDark ? "bg-zinc-800 hover:bg-zinc-700 text-white shadow-sm border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 font-bold shadow-sm border-transparent"
-             }`} title="Shkarko TXT">
-               <File className="w-3.5 h-3.5" /> TXT
-             </button>
-             <button onClick={exportCsv} className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
-               isDark ? "bg-zinc-800 hover:bg-zinc-700 text-white shadow-sm border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 font-bold shadow-sm border-transparent"
-             }`} title="Shkarko CSV">
-               <FileSpreadsheet className="w-3.5 h-3.5" /> CSV
-             </button>
-             <button onClick={exportPdf} className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
-               isDark ? "bg-zinc-800 hover:bg-zinc-700 text-white shadow-sm border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 font-bold shadow-sm border-transparent"
-             }`} title="Shkarko PDF">
-               <FileDown className="w-3.5 h-3.5" /> PDF
-             </button>
-             <button onClick={() => setShowCalculator(true)} className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
-               isDark ? "hover:bg-accent-800/30 text-accent-500" : "hover:bg-accent-50 text-accent-600"
-             }`} title="Llogaritës (Mini Calculator)">
-               <Calculator className="w-3.5 h-3.5" />
-             </button>
-             <button onClick={() => executeProtectedAction(() => setBlueModal(true))} className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
-               isDark ? "hover:bg-blue-800/30 text-blue-500 hover:text-orange-400" : "hover:bg-blue-50 text-blue-600 hover:text-orange-700"
-             }`} title="Shënime Sekrete">
-               <Lock className="w-3.5 h-3.5" /> Sekrete
-             </button>
+                    </>
+                 )}
              </div>
              
+             <div className="h-5 w-px bg-zinc-500/20 mx-0.5 shrink-0"></div>
 
+             {/* Status Change Buttons (Ok, Lock, X, Unlock) - Uniform h-8 w-8 rounded-xl */}
+             <button onClick={() => updateSelectedRowsStatus('ok')} className={`h-8 w-8 rounded-xl transition-all flex items-center justify-center shadow-md active:scale-95 shrink-0 ${isDark ? "bg-green-600 text-white hover:bg-green-500 shadow-green-950/10" : "bg-green-500 text-white hover:bg-green-600 shadow-green-100"}`} title={t("Në rregull (Ok)", "Ok")}>
+                <Check className="w-4 h-4" />
+             </button>
+             <button onClick={() => updateSelectedRowsStatus('blue')} className={`h-8 w-8 rounded-xl transition-all flex items-center justify-center shadow-md active:scale-95 shrink-0 ${isDark ? "bg-blue-600 text-white hover:bg-blue-500 shadow-blue-950/10" : "bg-blue-500 text-white hover:bg-blue-600 shadow-blue-100"}`} title={t("Sekrete / Rëndësi (Secret)", "Secret / Important")}>
+                <Lock className="w-4 h-4" />
+             </button>
+             <button onClick={() => updateSelectedRowsStatus('x')} className={`h-8 w-8 rounded-xl transition-all flex items-center justify-center shadow-md active:scale-95 shrink-0 ${isDark ? "bg-red-600 text-white hover:bg-red-500 shadow-red-950/10" : "bg-red-500 text-white hover:bg-red-600 shadow-red-100"}`} title={t("E Pavlefshme (Fshi)", "Invalid")}>
+                <X className="w-4 h-4" />
+             </button>
+             <button onClick={() => updateSelectedRowsStatus('yellow')} className={`h-8 w-8 rounded-xl transition-all flex items-center justify-center shadow-md active:scale-95 shrink-0 ${isDark ? "bg-yellow-600 text-black hover:bg-yellow-500 shadow-yellow-950/10" : "bg-yellow-500 text-zinc-950 hover:bg-yellow-600 shadow-yellow-100"}`} title={t("Sekrete e Verdhë (Yellow Secret)", "Yellow Secret")}>
+                <Lock className="w-4 h-4" />
+             </button>
+             <button onClick={() => updateSelectedRowsStatus('none')} className={`h-8 w-8 rounded-xl transition-all flex items-center justify-center shadow-md active:scale-95 shrink-0 ${isDark ? "bg-zinc-700 text-white hover:bg-zinc-600 shadow-zinc-950/10" : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300 shadow-zinc-100"}`} title={t("Hiq Statusin (Hiq)", "Remove Status")}>
+                <Unlock className="w-4 h-4" />
+             </button>
+             
+             <div className="relative shrink-0">
+                <button onClick={() => { setShowTagColorMenu(!showTagColorMenu); setShowTextColorMenu(false); setShowTextMenu(false); }} className={`h-8 w-8 rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-md ${isDark ? "bg-zinc-700 text-white hover:bg-zinc-600" : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"}`} title={t("Ngjyra e Etiketës (Tag)", "Tag Color")}>
+                   <Tag className="w-4 h-4" />
+                </button>
+                {showTagColorMenu && (
+                    <>
+                        <div className="fixed inset-0 z-[140]" onClick={() => setShowTagColorMenu(false)}></div>
+                        <div className={`absolute left-0 top-full mt-2 p-2 rounded-xl border shadow-xl z-[150] flex flex-col gap-1.5 w-[200px] ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"}`}>
+                            <div className="text-[10px] font-bold uppercase text-zinc-500 px-1 mb-1 border-b border-zinc-500/20 pb-1">{t('Etiketë me Ngjyrë', 'Color Tag')}</div>
+                            <div className="grid grid-cols-4 gap-1.5">
+                               {TAG_COLORS.map(c => (
+                                  <button key={c.id} onClick={() => { updateSelectedRowsStatus(c.id); setShowTagColorMenu(false); }} className={`w-7 h-7 rounded-[4px] shadow-sm border-2 border-black/10 hover:scale-110 transition-transform`} style={{ backgroundColor: c.color }} title={c.name} />
+                               ))}
+                            </div>
+                        </div>
+                    </>
+                )}
+             </div>
+             
+             <div className="h-5 w-px bg-zinc-500/20 mx-0.5 shrink-0"></div>
+             <div className="flex items-center gap-1 shrink-0">
+                   <button onClick={() => {
+                      executeProtectedAction(() => {
+                          if(headers.length > 1) {
+                              const newH = [...headers];
+                              newH.pop();
+                              setHeaders(newH);
+                              const newW = [...columnWidths];
+                              newW.pop();
+                              setColumnWidths(newW);
+                              updateActiveDocumentState(title, rows, newH, newW);
+                          }
+                      });
+                   }} title={t("Hiq Kolonë", "Remove Column")} className={`h-8 w-8 rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-md shrink-0 ${isDark ? "bg-zinc-700 text-zinc-300 hover:text-red-500 hover:bg-zinc-600" : "bg-zinc-200 text-zinc-600 hover:text-red-600 hover:bg-zinc-300"}`}>
+                      <Minus className="w-3.5 h-3.5" />
+                   </button>
+                   <span className={`text-xs font-extrabold min-w-[16px] text-center shrink-0 ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>{headers.length}</span>
+                   <button onClick={() => {
+                      executeProtectedAction(() => {
+                          if(headers.length < 8) {
+                              const newH = [...headers, `${t('Kolona', 'Col')} ${headers.length + 1}`];
+                              setHeaders(newH);
+                              const newW = [...columnWidths, 150];
+                              setColumnWidths(newW);
+                              updateActiveDocumentState(title, rows, newH, newW);
+                          }
+                      });
+                   }} title={t("Shto Kolonë", "Add Column")} className={`h-8 w-8 rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-md shrink-0 ${isDark ? "bg-zinc-700 text-zinc-300 hover:text-green-500 hover:bg-zinc-600" : "bg-zinc-200 text-zinc-600 hover:text-green-600 hover:bg-zinc-300"}`}>
+                      <Plus className="w-3.5 h-3.5" />
+                   </button>
+                   <div className="h-5 w-px bg-zinc-500/20 mx-0.5 shrink-0"></div>
+                   <button onClick={() => setPreviewSelectedRows(true)} title={t("Shfaq Rrjeshtat e Shenjuar", "View Selected Rows")} className={`h-8 w-8 rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-md shrink-0 ${isDark ? "bg-zinc-700 text-zinc-300 hover:text-accent-500 hover:bg-zinc-600" : "bg-zinc-200 text-zinc-600 hover:text-accent-600 hover:bg-zinc-300"}`}>
+                      <Eye className="w-4 h-4" />
+                   </button>
+             </div>
+        
+             <div className="h-5 w-px bg-zinc-500/20 mx-0.5 shrink-0"></div>
+
+             {/* Core Actions (AI Chat, Ruaj, Fshi/Bosh) */}
+             <button onClick={() => setAiChatModal(true)} className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all shadow-md active:scale-95 shrink-0 ${
+                isDark ? "bg-accent-600 hover:bg-accent-500 text-white shadow-accent-950/20" : "bg-accent-500 hover:bg-accent-600 text-white shadow-accent-100"
+             }`} title={t("Analizo me AI (AI Chat)", "Analyze with AI")}>
+                <Sparkles className="w-4 h-4" />
+             </button>
+
+             <button onClick={saveCurrentDocument} className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all shadow-md active:scale-95 shrink-0 ${
+                isDark ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/20" : "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-100"
+             }`} title={t("Ruaj", "Save")}>
+                <Save className="w-4 h-4" />
+             </button>
+
+             {selectedRows.size > 0 ? (
+                <button onClick={() => executeProtectedAction(() => setShowConfirmDeleteSelected(true))} className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all shadow-md active:scale-95 shrink-0 ${
+                   isDark ? "bg-red-600 hover:bg-red-500 text-white shadow-red-950/20" : "bg-red-500 hover:bg-red-600 text-white shadow-red-100"
+                }`} title={`${t('Fshi', 'Delete')} (${selectedRows.size})`}>
+                   <Trash2 className="w-4 h-4" />
+                </button>
+             ) : (
+                <button onClick={() => executeProtectedAction(() => setShowConfirmClear(true))} className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all shadow-md active:scale-95 shrink-0 ${
+                   isDark ? "bg-red-600 hover:bg-red-500 text-white shadow-red-950/20" : "bg-red-500 hover:bg-red-600 text-white shadow-red-100"
+                }`} title={t('Bosh', 'Clear')}>
+                   <Trash2 className="w-4 h-4" />
+                </button>
+             )}
+             
+             <div className="h-5 w-px bg-zinc-500/20 mx-0.5 shrink-0"></div>
+
+             {/* Extra Tools (Theme Palette, Light/Dark toggle, Downloads, Mini Calculator, Sekrete) */}
+             <div className="relative shrink-0">
+                <button 
+                  onClick={() => setShowThemeMenu(!showThemeMenu)}
+                  className={`h-8 w-8 rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-md shrink-0 ${isDark ? "bg-accent-600 hover:bg-accent-500 text-white" : "bg-accent-500 hover:bg-accent-600 text-white"}`}
+                  title="Ndërro Ngjyrën"
+                >
+                  <Palette className="w-4 h-4" />
+                </button>
+                {showThemeMenu && (
+                   <div className={`absolute right-0 top-full mt-2 p-2 rounded-xl border shadow-xl z-[150] flex flex-col gap-1.5 w-[220px] ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"}`}>
+                      <div className="text-[10px] font-bold uppercase text-zinc-500 px-1 mb-1 border-b border-zinc-500/20 pb-1">{t('Ngjyra kryesore', 'Accent Color')}</div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                         {(Object.keys(COLOR_THEMES) as Array<keyof typeof COLOR_THEMES>).map(c => (
+                            <button key={c} onClick={() => { setAccentColor(c); setShowThemeMenu(false); }} className="w-7 h-7 shrink-0 rounded-lg border-2 border-black/10 transition-transform hover:scale-110 shadow-sm" style={{ backgroundColor: c === 'kontrast' ? '#000000' : COLOR_THEMES[c][500] }} title={c === 'kontrast' ? 'Kontrast i Lartë' : c} />
+                         ))}
+                      </div>
+                   </div>
+                )}
+             </div>
+
+             <button 
+               onClick={toggleTheme}
+               className={`h-8 w-8 rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-md shrink-0 ${isDark ? "bg-yellow-600 hover:bg-yellow-500 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-white"}`}
+               title="Ndërro Temën"
+             >
+               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+             </button>
+
+             <div className="h-5 w-px bg-zinc-500/20 mx-0.5 shrink-0"></div>
+
+             <button onClick={exportTxt} className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all shadow-md active:scale-95 shrink-0 ${
+               isDark ? "bg-zinc-800 hover:bg-zinc-700 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 font-bold border-transparent"
+             }`} title="Shkarko TXT">
+               <File className="w-4 h-4" />
+             </button>
+             <button onClick={exportCsv} className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all shadow-md active:scale-95 shrink-0 ${
+               isDark ? "bg-zinc-800 hover:bg-zinc-700 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 font-bold border-transparent"
+             }`} title="Shkarko CSV">
+               <FileSpreadsheet className="w-4 h-4" />
+             </button>
+             <button onClick={exportPdf} className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all shadow-md active:scale-95 shrink-0 ${
+               isDark ? "bg-zinc-800 hover:bg-zinc-700 text-white border-transparent" : "bg-zinc-200 hover:bg-zinc-300 text-zinc-900 font-bold border-transparent"
+             }`} title="Shkarko PDF">
+               <FileDown className="w-4 h-4" />
+             </button>
+             <button onClick={() => setShowCalculator(true)} className={`h-8 w-8 rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-md shrink-0 ${
+               isDark ? "bg-zinc-800 hover:bg-zinc-700 text-accent-500" : "bg-zinc-200 hover:bg-zinc-300 text-accent-600"
+             }`} title="Llogaritës (Mini Calculator)">
+               <Calculator className="w-4 h-4" />
+             </button>
+             <button onClick={() => executeProtectedAction(() => setBlueModal(true))} className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all shadow-md active:scale-95 shrink-0 ${
+               isDark ? "bg-zinc-800 hover:bg-zinc-700 text-blue-500" : "bg-zinc-200 hover:bg-zinc-300 text-blue-600"
+             }`} title="Shënime Sekrete">
+               <Key className="w-4 h-4" />
+             </button>
+
+             <span className={`text-[10px] font-bold tracking-wide flex items-center gap-1 px-2.5 whitespace-nowrap shrink-0 border-l border-zinc-500/20 h-8 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+                <Calendar className="w-3.5 h-3.5" />
+                {getAlbanianDateTime()}
+             </span>
+          </div>
         </div>
-      </div>
 
-      {/* HORIZONTAL WRAPPER FOR SWIPasswordG COLUMNS */}
-      {/* ADDED overscroll-x-contain touch-pan-x for better mobile swipe UX */}
+{/* ADDED overscroll-x-contain touch-pan-x for better mobile swipe UX */}
       <div className={`flex-1 overflow-x-auto overflow-y-auto overscroll-x-contain scrollbar-hide touch-pan-x touch-pan-y ${isDark ? "bg-zinc-950" : "bg-zinc-50"}`}>
         <div className="min-w-[800px] w-full flex flex-col relative">
           
@@ -10815,6 +11111,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 <div key={`${r.id}-${rIndex}`} className={`flex border-b min-h-[28px] group w-full transition-colors ${
                   r.status === 'ok' ? (isDark ? 'bg-green-500/25 border-green-500/40' : 'bg-green-50 border-green-200')
                   : r.status === 'blue' ? (isDark ? 'bg-blue-500/25 border-blue-500/40' : 'bg-blue-50 border-blue-200')
+                  : r.status === 'yellow' ? (isDark ? 'bg-yellow-500/25 border-yellow-500/40' : 'bg-yellow-50 border-yellow-200')
                   : r.status === 'x' ? (isDark ? 'bg-red-500/25 border-red-500/40' : 'bg-red-50 border-red-200')
                   : isDark ? "border-zinc-800/80 focus-within:bg-zinc-900/50" : "border-zinc-200 focus-within:bg-zinc-50"
                 }`}>
@@ -10826,6 +11123,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                         ? "bg-accent-500 text-white border-r-accent-600"
                         : r.status === 'ok' ? (isDark ? "bg-green-500/20 text-green-400 border-zinc-800" : "bg-green-100 text-green-700 border-zinc-200")
                         : r.status === 'blue' ? (isDark ? "bg-blue-500/20 text-blue-400 border-zinc-800" : "bg-blue-100 text-blue-700 border-zinc-200")
+                        : r.status === 'yellow' ? (isDark ? "bg-yellow-500/20 text-yellow-400 border-zinc-800" : "bg-yellow-100 text-yellow-700 border-zinc-200")
                         : r.status === 'x' ? (isDark ? "bg-red-500/20 text-red-400 border-zinc-800" : "bg-red-100 text-red-700 border-zinc-200")
                         : isDark 
                           ? "bg-zinc-900/50 border-zinc-800 text-zinc-600 group-hover:bg-zinc-900/80 group-hover:text-zinc-400" 
@@ -10847,7 +11145,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                         <CellInput
                           initialValue={r[colKey as keyof GridRow] as string}
                           onChange={(v: string) => updateCell(rIndex, colKey, v)}
-                          readOnly={r.status === 'ok' || r.status === 'blue' || r.status === 'x' || r.status === 'lock'}
+                          readOnly={r.status === 'ok' || r.status === 'blue' || r.status === 'yellow' || r.status === 'x' || r.status === 'lock'}
                           startHold={() => handleCellHoldStart(rIndex, colKey)}
                           stopHold={handleCellHoldCancel}
                           className={`w-full h-full resize-none focus:outline-none px-1.5 py-0.5 rounded scrollbar-hide leading-[1.3] transition-colors ${
@@ -10855,6 +11153,8 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                               ? `line-through decoration-red-500 placeholder-red-500/50 cursor-default bg-transparent ${isDark ? "text-red-100" : "text-red-900"}`
                               : r.status === 'blue'
                                 ? `placeholder-blue-500/50 cursor-default bg-transparent ${isDark ? "text-blue-100" : "text-blue-900"}`
+                              : r.status === 'yellow'
+                                ? `placeholder-yellow-600/50 cursor-default bg-transparent ${isDark ? "text-yellow-100" : "text-yellow-900"}`
                               : r.status === 'ok'
                                 ? `placeholder-green-500/50 cursor-default bg-transparent ${isDark ? "text-green-100" : "text-green-900"}`
                                 : (isDark ? `${inputBgDark} ${textColorMode === 'default' ? 'text-white' : ''} placeholder-zinc-700/50 focus:border-zinc-700/50` : `${inputBgLight} ${textColorMode === 'default' ? 'text-zinc-900' : ''} placeholder-zinc-400/70 focus:border-zinc-300`)
@@ -11191,7 +11491,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                 <div className={`flex-1 p-5 ${isDark ? "bg-zinc-950" : "bg-white"}`}>
                     <textarea
                       autoFocus
-                      readOnly={rows[activeCell.rIndex]?.status === 'lock' || rows[activeCell.rIndex]?.status === 'ok' || rows[activeCell.rIndex]?.status === 'blue' || rows[activeCell.rIndex]?.status === 'x'}
+                      readOnly={rows[activeCell.rIndex]?.status === 'lock' || rows[activeCell.rIndex]?.status === 'ok' || rows[activeCell.rIndex]?.status === 'blue' || rows[activeCell.rIndex]?.status === 'yellow' || rows[activeCell.rIndex]?.status === 'x'}
                       value={modalText}
                       onChange={(e) => {
                           const val = e.target.value;
@@ -11200,9 +11500,17 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
                       }}
                       placeholder="Zgjero shënimet e tua dhe shkruaj lirshëm këtu..."
                       className={`w-full h-full bg-transparent resize-none focus:outline-none text-base leading-relaxed overflow-y-auto ${
-                        (rows[activeCell.rIndex]?.status === 'lock' || rows[activeCell.rIndex]?.status === 'ok' || rows[activeCell.rIndex]?.status === 'blue' || rows[activeCell.rIndex]?.status === 'x')
-                           ? (isDark ? "text-amber-500/90 cursor-default" : "text-amber-600/90 cursor-default")
-                           : (isDark ? "text-zinc-200 placeholder-zinc-700" : "text-zinc-800 placeholder-zinc-400")
+                        rows[activeCell.rIndex]?.status === 'x'
+                          ? `line-through cursor-default ${isDark ? "text-red-400/90" : "text-red-600/90 font-semibold"}`
+                          : rows[activeCell.rIndex]?.status === 'ok'
+                            ? `cursor-default ${isDark ? "text-green-400/90" : "text-green-600/90 font-semibold"}`
+                            : rows[activeCell.rIndex]?.status === 'blue'
+                              ? `cursor-default ${isDark ? "text-blue-400/90" : "text-blue-600/90 font-semibold"}`
+                              : rows[activeCell.rIndex]?.status === 'yellow'
+                                ? `cursor-default ${isDark ? "text-yellow-400/90" : "text-yellow-600/90 font-semibold"}`
+                                : rows[activeCell.rIndex]?.status === 'lock'
+                                  ? `cursor-default ${isDark ? "text-amber-400/90" : "text-amber-600/90"}`
+                                  : isDark ? "text-zinc-200 placeholder-zinc-700" : "text-zinc-800 placeholder-zinc-400"
                       }`}
                       spellCheck={false}
                     />
@@ -11293,7 +11601,7 @@ Kthe VETËM JSON të vlefshëm pa koodblock markdown!`;
 
       {/* TOAST CUSTOM FOR INNER VIEW */}
       {toastMessage && (
-         <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-accent-600 text-white px-4 py-2 rounded-lg shadow-lg font-medium text-sm animate-in fade-in slide-in-from-top-4 z-[300]">
+         <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-accent-600 text-white px-4 py-2 rounded-lg shadow-lg font-medium text-sm animate-in fade-in slide-in-from-bottom-4 z-[300] pointer-events-none">
             {toastMessage}
          </div>
       )}
